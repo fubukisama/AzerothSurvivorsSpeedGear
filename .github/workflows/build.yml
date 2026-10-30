@@ -1,0 +1,43 @@
+name: Windows build and tests
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare Lua 5.0.3 test sources
+        shell: pwsh
+        run: |
+          $luaDir = Join-Path $env:RUNNER_TEMP 'AZSSpeedGearLua50'
+          New-Item -ItemType Directory -Path $luaDir -Force | Out-Null
+          $archive = Join-Path $luaDir 'lua-5.0.3.tar.gz'
+          Invoke-WebRequest 'https://www.lua.org/ftp/lua-5.0.3.tar.gz' -OutFile $archive
+          $expected = '1193a61b0e08acaa6eee0eecf29709179ee49c71baebc59b682a25c3b5a45671'
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Lua source checksum mismatch.' }
+          tar --exclude=lua-5.0.3/test/lua --exclude=lua-5.0.3/test/luac -xzf $archive -C $luaDir
+          if ($LASTEXITCODE -ne 0) { throw 'Lua source extraction failed.' }
+          Add-Content $env:GITHUB_ENV "LUA50_ROOT=$luaDir/lua-5.0.3"
+      - name: Configure
+        run: cmake -S . -B build -A x64 "-DLUA50_ROOT=$env:LUA50_ROOT"
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Package
+        run: ./scripts/Package.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AZSSpeedGearWindowsX64
+          path: dist/*.zip
+          if-no-files-found: error
