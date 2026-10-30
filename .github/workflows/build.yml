@@ -46,6 +46,7 @@ jobs:
           ./tests/launcher_test.ps1
           ./tests/native_updater_test.ps1
           ./tests/installer_test.ps1
+          ./tests/toc_notes_test.ps1
       - name: Package
         run: ./scripts/Package.ps1
       - uses: actions/upload-artifact@v4

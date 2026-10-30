@@ -1,5 +1,14 @@
 # AzerothSurvivorsSpeedGear
 
+Since 0.6.1 the addon-list description follows the game's saved language across
+all fourteen supported languages, while the title remains **AzerothSurvivorsSpeedGear**.
+Restart after changing language to refresh cached addon metadata. The native
+component selects the normal TOC `Notes` before the game reads the manifest;
+legacy client locale suffixes alone cannot express all fourteen game settings.
+Only fixed translated Notes values are mutable. Receipt checks normalize that
+one value to the English baseline and still verify every other byte, so ordinary
+language changes do not block updates or reversible removal.
+
 [简体中文](README.zh-CN.md) · [Downloads](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/releases)
 
 An in-game speed control addon for **Azeroth Survivors on Windows x64**. Click

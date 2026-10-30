@@ -19,6 +19,7 @@
 #include "language_bridge.h"
 #include "diagnostics.h"
 #include "native_update.h"
+#include "toc_notes.h"
 
 namespace {
 using QpcFn=BOOL(WINAPI*)(LARGE_INTEGER*);
@@ -65,6 +66,8 @@ DWORD WINAPI languageWorker(void*) {
     while(true) {
         if(azsg::refresh_language_hint(root,languageFile)==azsg::LanguageHintResult::written)
             log("locale-hint updated from native game language setting");
+        if(azsg::refresh_toc_notes(root,languageFile)==azsg::TocNotesResult::written)
+            log("addon description synchronized with game language setting");
         Sleep(1000);
     }
 }
@@ -172,7 +175,7 @@ DWORD WINAPI worker(void*) {
     productionGame=_wcsicmp(exe.filename().c_str(),L"AzerothSurvivors.exe")==0;
     if(!productionGame && _wcsicmp(exe.filename().c_str(),L"AZSSpeedGearTestHost.exe")!=0) return 0;
     root=exe.parent_path();
-    log("AzerothSurvivorsSpeedGear 0.6.0 start; default=1x; protocol=SG1");
+    log("AzerothSurvivorsSpeedGear 0.6.1 start; default=1x; protocol=SG1");
     // This ordinary worker runs after loader initialization. Never create a
     // process or wait in DllMain, a timing hook, or the game's entrypoint.
     if(productionGame) log("native-updater="+azsg::start_native_update(exe));

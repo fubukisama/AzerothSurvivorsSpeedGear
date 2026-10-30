@@ -140,6 +140,50 @@ function Assert-LocaleHint([string]$Path) {
     }
 }
 
+function Test-AZSGOwnedTocNotes([string]$Path, [string]$RelativePath, [string]$ExpectedSHA256, $Receipt, [string]$GameRoot) {
+    # Exact hashes remain the default. Only the root TOC's known Notes value is
+    # mutable, and no code from a downloaded package is loaded for this check.
+    if ($RelativePath -cne 'benilla-config\AddOns\AZSSpeedGear\AZSSpeedGear.toc') { return $false }
+    try {
+        $expectedPath = [IO.Path]::GetFullPath([IO.Path]::Combine($GameRoot, $RelativePath))
+        if (-not [string]::Equals([IO.Path]::GetFullPath($Path), $expectedPath, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+        $libraryRelative = 'benilla-config\AddOns\AZSSpeedGear\Updater\TocNotes.ps1'
+        $entries = @($Receipt.ManagedFiles | Where-Object { [string]$_.RelativePath -ceq $libraryRelative })
+        if ($entries.Count -ne 1 -or [string]$entries[0].SHA256 -cnotmatch '^[a-fA-F0-9]{64}$') { return $false }
+        $library = [IO.Path]::GetFullPath([IO.Path]::Combine($GameRoot, $libraryRelative))
+        $current = $library
+        while (-not [string]::IsNullOrWhiteSpace($current)) {
+            if (([IO.File]::GetAttributes($current) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+            $current = [IO.Path]::GetDirectoryName($current)
+        }
+        $readBounded = {
+            param([string]$Name, [int]$Maximum)
+            $stream = [IO.File]::Open($Name, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            try {
+                if ($stream.Length -gt $Maximum) { throw 'Receipt-owned metadata file exceeds its size limit.' }
+                $payload = [byte[]]::new([int]$stream.Length)
+                $offset = 0
+                while ($offset -lt $payload.Length) {
+                    $count = $stream.Read($payload, $offset, $payload.Length - $offset)
+                    if ($count -eq 0) { throw 'Receipt-owned metadata file changed while reading.' }
+                    $offset += $count
+                }
+                return ,$payload
+            } finally { $stream.Dispose() }
+        }
+        $libraryBytes = & $readBounded $library 65536
+        $algorithm = [Security.Cryptography.SHA256]::Create()
+        try { $libraryHash = [BitConverter]::ToString($algorithm.ComputeHash($libraryBytes)).Replace('-', '') }
+        finally { $algorithm.Dispose() }
+        if ($libraryHash -ine [string]$entries[0].SHA256) { return $false }
+        # Execute the bytes just verified, avoiding a second path read between
+        # hash verification and loading. Old receipts without the library fail.
+        $libraryText = ([Text.UTF8Encoding]::new($false, $true)).GetString($libraryBytes)
+        . ([scriptblock]::Create($libraryText))
+        return Test-AZSGTocNotesReceiptHash -Bytes (& $readBounded $Path 16384) -ExpectedSHA256 $ExpectedSHA256
+    } catch { return $false }
+}
+
 function Assert-OwnedInstallation($Receipt) {
     if ($Receipt.Product -cne 'AZSSpeedGear' -or $Receipt.SchemaVersion -ne 1 -or
         (Get-FullPath ([string]$Receipt.GameExecutable)) -ine $script:gameExe) {
@@ -156,7 +200,8 @@ function Assert-OwnedInstallation($Receipt) {
         }
         $expected[$path] = [string]$file.SHA256
         if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
-            (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ine [string]$file.SHA256) {
+            ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ine [string]$file.SHA256 -and
+             -not (Test-AZSGOwnedTocNotes $path ([string]$file.RelativePath) ([string]$file.SHA256) $Receipt $script:gameRoot))) {
             throw "Installed file is missing or changed; refusing to replace it: $path"
         }
     }

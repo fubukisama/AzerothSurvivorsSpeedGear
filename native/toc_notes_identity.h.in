@@ -1,0 +1,6 @@
+#pragma once
+// Source and packaged TOCs use LF (.gitattributes). This is data, not code.
+namespace azsg { namespace toc_identity {
+inline constexpr char original[] = u8R"AZSG_TOC(@AZSG_TOC_TEMPLATE@)AZSG_TOC";
+} }
+#define AZSG_TOC_TEMPLATE ::azsg::toc_identity::original

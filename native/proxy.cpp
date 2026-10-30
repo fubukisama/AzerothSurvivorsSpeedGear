@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <array>
 #include <string>
+#include "toc_notes.h"
 
 void StartBackend(HMODULE self);
 namespace {
@@ -27,9 +28,12 @@ extern "C" FARPROC ProxyGetFunction(unsigned index) {
         RaiseFailFastException(nullptr,nullptr,0);
     return functions[index];
 }
-BOOL WINAPI DllMain(HMODULE self,DWORD reason,LPVOID) {
+BOOL WINAPI DllMain(HMODULE self,DWORD reason,LPVOID reserved) {
     if(reason==DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(self);
+        // Bounded Kernel32-only metadata IO, before the EXE reads addon notes.
+        // No network, crypto provider, waiting, or entrypoint patch is involved.
+        if(reserved) azsg::initialize_toc_notes_before_entry();
         StartBackend(self);
     }
     return TRUE;

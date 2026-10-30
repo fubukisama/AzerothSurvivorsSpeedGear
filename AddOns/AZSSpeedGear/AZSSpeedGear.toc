@@ -1,7 +1,21 @@
 ## Interface: 11200
 ## Title: AzerothSurvivorsSpeedGear
-## Notes: 单人游戏倍速请求面板；需要 AzerothSurvivorsSpeedGear 原生后端。
-## Version: 0.6.0
+## Notes: Single-player speed controls; requires the AzerothSurvivorsSpeedGear native component.
+## X-AZSG-Notes-en: Single-player speed controls; requires the AzerothSurvivorsSpeedGear native component.
+## X-AZSG-Notes-zh: 单人游戏倍速控制；需要 AzerothSurvivorsSpeedGear 原生组件。
+## X-AZSG-Notes-ja: ソロプレイの速度調整。AzerothSurvivorsSpeedGear のネイティブコンポーネントが必要です。
+## X-AZSG-Notes-pl: Sterowanie szybkością gry jednoosobowej; wymaga natywnego komponentu AzerothSurvivorsSpeedGear.
+## X-AZSG-Notes-cs: Ovládání rychlosti hry pro jednoho hráče; vyžaduje nativní komponentu AzerothSurvivorsSpeedGear.
+## X-AZSG-Notes-de: Geschwindigkeitssteuerung im Einzelspielermodus; benötigt die native Komponente von AzerothSurvivorsSpeedGear.
+## X-AZSG-Notes-pt: Controle de velocidade no modo solo; requer o componente nativo do AzerothSurvivorsSpeedGear.
+## X-AZSG-Notes-es: Control de velocidad para un jugador; requiere el componente nativo de AzerothSurvivorsSpeedGear.
+## X-AZSG-Notes-fr: Contrôle de la vitesse en solo ; nécessite le composant natif AzerothSurvivorsSpeedGear.
+## X-AZSG-Notes-ro: Controlul vitezei în modul solo; necesită componenta nativă AzerothSurvivorsSpeedGear.
+## X-AZSG-Notes-tr: Tek oyunculu hız kontrolü; AzerothSurvivorsSpeedGear yerel bileşenini gerektirir.
+## X-AZSG-Notes-ru: Управление скоростью в одиночной игре; требуется нативный компонент AzerothSurvivorsSpeedGear.
+## X-AZSG-Notes-uk: Керування швидкістю в одиночній грі; потрібен нативний компонент AzerothSurvivorsSpeedGear.
+## X-AZSG-Notes-ko: 싱글 플레이 배속 조절; AzerothSurvivorsSpeedGear 네이티브 구성 요소가 필요합니다.
+## Version: 0.6.1
 ## Author: AzerothSurvivorsSpeedGear contributors
 ## SavedVariables: AZSSpeedGearDB
 

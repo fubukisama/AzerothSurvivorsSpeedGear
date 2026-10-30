@@ -1,5 +1,17 @@
 # Validation — updated 2026-10-31
 
+## Version 0.6.1 addon description language
+
+Remote-only fixtures cover fourteen fixed description values, English fallback,
+strict non-Notes template identity, atomic file replacement and rejection of
+unknown edits. The actual DWM-load fixture uses an isolated APPDATA/language.txt
+set to Japanese and checks the on-disk Notes by the tiny EXE's main entry. This
+does not operate the real game's AddOns UI or prove its cache refresh behavior.
+PowerShell fixtures cover normalized receipt validation across install, update
+and reversible uninstall, including rejection of metadata/script/catalog edits
+and unowned normalization libraries. Downloaded package checks remain exact.
+No local script test, native build, probe, helper or game/UI launch is performed.
+
 ## Version 0.6.0 direct EXE updates
 
 All new tests run only on remote Windows CI. The native launch-policy tests use

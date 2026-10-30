@@ -11,6 +11,15 @@ Copy-Item -LiteralPath $HostPath -Destination $game
 Copy-Item -LiteralPath $DllPath -Destination (Join-Path $gameRoot 'dwmapi.dll')
 $project=Split-Path -Parent $PSScriptRoot
 Copy-Item -LiteralPath (Join-Path $project 'scripts\NativeUpdate.ps1') -Destination (Join-Path $updater 'NativeUpdate.ps1')
+$sourceToc=Join-Path $project 'AddOns\AZSSpeedGear\AZSSpeedGear.toc'
+Copy-Item -LiteralPath $sourceToc -Destination (Join-Path (Split-Path -Parent $updater) 'AZSSpeedGear.toc')
+$japanesePrefix='## X-AZSG-Notes-ja: '
+$japaneseLine=@(Get-Content -LiteralPath $sourceToc -Encoding UTF8 | Where-Object {$_.StartsWith($japanesePrefix)})
+if($japaneseLine.Count -ne 1){throw 'The Japanese description is missing from the real TOC template.'}
+[IO.File]::WriteAllText((Join-Path $gameRoot 'expected.notes'),$japaneseLine[0].Substring($japanesePrefix.Length),[Text.UTF8Encoding]::new($false))
+$profile=Join-Path $root 'isolated-profile'
+New-Item -ItemType Directory -Path (Join-Path $profile 'wenilla-rogue') -Force | Out-Null
+[IO.File]::WriteAllText((Join-Path $profile 'wenilla-rogue\language.txt'),'ja',[Text.UTF8Encoding]::new($false))
 $mock=@'
 param([string]$GamePath,[switch]$WaitForExit)
 $root=Split-Path -Parent $GamePath
@@ -40,7 +49,7 @@ $process=$null
 try{
     # This is the tiny compiled fixture, not the official game. No launcher or
     # Update.ps1 entrypoint is invoked by the harness to trigger the first check.
-    $process=Start-Process -FilePath $game -WorkingDirectory $gameRoot -PassThru -WindowStyle Hidden
+    $process=Start-Process -FilePath $game -WorkingDirectory $gameRoot -PassThru -WindowStyle Hidden -Environment @{APPDATA=$profile}
     Wait-Marker 'host.started'
     Wait-Marker 'immediate.marker'
     if($process.HasExited){throw 'Fixture exited before the immediate update check.'}
@@ -49,7 +58,7 @@ try{
     if(-not $process.WaitForExit(10000) -or $process.ExitCode -ne 0){throw 'Direct EXE fixture failed or did not stop normally.'}
     Wait-Marker 'post.marker'
     if(@(Get-Content -LiteralPath (Join-Path $gameRoot 'immediate.marker')).Count -ne 1){throw 'Immediate check ran more than once.'}
-    [pscustomobject]@{Passed=$true;StaticDwmLoadTriggeredUpdate=$true;GameEntrypointUnchanged=$true;AfterExitCheck=$true;ActualGameUsed=$false} | ConvertTo-Json
+    [pscustomobject]@{Passed=$true;StaticDwmLoadTriggeredUpdate=$true;GameEntrypointUnchanged=$true;JapaneseMetadataReadyAtEntry=$true;AfterExitCheck=$true;ActualGameUsed=$false} | ConvertTo-Json
 } finally {
     if($null -ne $process -and -not $process.HasExited){
         New-Item -ItemType File -Path (Join-Path $gameRoot 'exit.request') -Force | Out-Null

@@ -12,6 +12,40 @@ local function placeholders(text)
     return table.concat(values, "|");
 end
 local languages = { "en", "zh", "ja", "pl", "cs", "de", "pt", "es", "fr", "ro", "tr", "ru", "uk", "ko" };
+-- The TOC carries custom short-code translations. Standard client-locale Notes
+-- would override the native game's selected ordinary Notes and are forbidden.
+local tocFile = assert(io.open("AddOns/AZSSpeedGear/AZSSpeedGear.toc", "rb"));
+local tocText = tocFile:read("*a");
+tocFile:close();
+local noteMetadata = {};
+local noteCount, baseCount, titleCount, standardOverrides = 0, 0, 0, 0;
+local baseNote, tocTitle = nil, nil;
+for line in string.gfind(tocText, "[^\r\n]+") do
+    local first, last, code, note = string.find(line, "^## X%-AZSG%-Notes%-([a-z]+): (.+)$");
+    if (code) then
+        check(noteMetadata[code] == nil, "TOC note metadata is unique: " .. code);
+        noteMetadata[code] = note;
+        noteCount = noteCount + 1;
+    end
+    local baseFirst, baseLast, value = string.find(line, "^## Notes: (.*)$");
+    if (baseFirst) then baseCount = baseCount + 1; baseNote = value; end
+    local titleFirst, titleLast, title = string.find(line, "^## Title: (.*)$");
+    if (titleFirst) then titleCount = titleCount + 1; tocTitle = title; end
+    if (string.find(string.lower(line), "^##%s*notes%-")) then standardOverrides = standardOverrides + 1; end
+end
+check(baseCount == 1 and type(baseNote) == "string" and string.find(baseNote, "%S") ~= nil, "TOC has one nonempty ordinary Notes baseline");
+check(titleCount == 1 and tocTitle == "AzerothSurvivorsSpeedGear", "TOC title is the fixed English project name");
+check(standardOverrides == 0, "TOC has no standard Notes-locale overrides");
+check(noteCount == table.getn(languages), "TOC has exactly the fourteen private note translations");
+check(baseNote == noteMetadata.en and string.find(baseNote, "[\128-\255]") == nil, "ordinary Notes matches the canonical English private note");
+local noteIndex = 1;
+while (noteIndex <= table.getn(languages)) do
+    local code = languages[noteIndex];
+    local note = noteMetadata[code];
+    check(type(note) == "string" and string.find(note, "%S") ~= nil, "TOC translated note exists: " .. code);
+    check(type(note) == "string" and string.find(note, "AzerothSurvivorsSpeedGear", 1, true) ~= nil, "TOC note preserves the English product name: " .. code);
+    noteIndex = noteIndex + 1;
+end
 local index = 1;
 GetLocale = function() return "enUS"; end;
 while (index <= table.getn(languages)) do

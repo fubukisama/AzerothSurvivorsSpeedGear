@@ -31,6 +31,14 @@ int wmain(int argc,wchar_t** argv) {
         }
     }
     if(!checked) return 5;
+    if(std::filesystem::exists(root/L"expected.notes")) {
+        std::ifstream expected_file(root/L"expected.notes",std::ios::binary);
+        const std::string expected{std::istreambuf_iterator<char>(expected_file),std::istreambuf_iterator<char>()};
+        std::ifstream toc_file(root/L"benilla-config"/L"AddOns"/L"AZSSpeedGear"/L"AZSSpeedGear.toc",std::ios::binary);
+        std::string line,notes;
+        while(std::getline(toc_file,line)) if(line.rfind("## Notes: ",0)==0) notes=line.substr(10);
+        if(notes!=expected) return 7;
+    }
     {std::ofstream marker(root/L"host.started");marker<<"DWM forwarded; original entrypoint unchanged\n";}
     const auto deadline=GetTickCount64()+40000;
     while(GetTickCount64()<deadline) {
