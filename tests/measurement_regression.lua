@@ -132,8 +132,9 @@ print("post-confirm oracle: requested_rate=2 actual_rate=2.35 observed=" .. tost
 check(rightMeter.measured and rightMeter.measured > 2.2 and rightMeter.confirmedSpeed100 == nil,
     "sustained independent x2.35 progression must revoke prior requested x2 confirmation");
 right.actualRate = 2;
-right:step(720);
-check(rightMeter.confirmedSpeed100 == 200, "fresh matching progress may confirm again after a real overspeed clears");
+right:step(300);
+check(rightMeter.confirmedSpeed100 == 200,
+    "fresh matching progress must recover within five observed seconds after a definite overspeed clears");
 right.frozen = true;
 right:step(180);
 check(rightMeter.confirmedSpeed100 == nil,

@@ -195,6 +195,9 @@ shared saved variables, sibling addons and `avrt.dll` are retained.
 
 Requirements: Windows, Visual Studio 2022/2026 with C++ x64 tools and MASM,
 Windows SDK, and CMake 3.21 or later. MinHook 1.3.4 is vendored with its license.
+The remote Windows build workflow runs the following commands. Several isolated
+integration tests require the hosted CI environment and deliberately refuse a
+workstation run.
 
 ```powershell
 cmake -S . -B build -A x64
@@ -210,7 +213,9 @@ They are not required to run the plugin.
 
 `AZSSpeedGearProbe.exe <game.exe> --selftest` performs a read-only scan, including
 refusal tests for an altered duration and duplicate candidates. It does not start
-or modify the game. CI uses a synthetic simulation host and needs no game files.
+or modify the game. The normal build CI uses synthetic hosts and needs no game
+files. The separate, manually dispatched game-acceptance workflow downloads
+official files into an ephemeral runner and retains only numerical evidence.
 
 ## License
 

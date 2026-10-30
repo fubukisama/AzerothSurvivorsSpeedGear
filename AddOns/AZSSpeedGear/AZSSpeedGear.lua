@@ -79,6 +79,7 @@ function Gear.NewController(api)
 
     function self:ResetMeasurement()
         self.measured = nil;
+        self.measurementMismatch = false;
         self.confirmedSpeed100 = nil;
         self.measurePendingAt = nil;
         self.measureUncertainty = nil;
@@ -184,6 +185,7 @@ function Gear.NewController(api)
             low = delta / upperElapsed; high = delta / lowerElapsed;
         end
         local target = self.speed100 / 100;
+        self.measurementMismatch = low and (high < target * 0.90 or low > target * 1.10) or false;
         local retained = self.confirmedSpeed100 == self.speed100;
         local tolerance = 0.10;
         local contained = hasClock and low and low >= target * (1 - tolerance) and high <= target * (1 + tolerance);
@@ -198,7 +200,9 @@ function Gear.NewController(api)
         end
         -- Keep accumulating when the interval is too wide. Resetting each short
         -- window would otherwise make conservative confirmation impossible.
-        if (contained or elapsed >= 12) then
+        -- A definite mismatch is also a completed observation. Do not keep
+        -- averaging it into a later genuine rate change during recovery.
+        if (contained or self.measurementMismatch or elapsed >= 12) then
             self.measureStart = now; self.measureRun = run;
             self.measureUncertainty = uncertainty; self.measureRawAge = rawAge;
         end
@@ -441,9 +445,9 @@ local function render()
     else
         status = string.format(tr("target_wait"), speedText(controller.speed100));
         if (controller.measured) then
-            if (not measurementMatchesTarget()) then
+            if (controller.measurementMismatch) then
                 status = tr("below_target");
-            else status = string.format(tr("target_measured"), speedText(controller.speed100)); end
+            elseif (measurementMatchesTarget()) then status = string.format(tr("target_measured"), speedText(controller.speed100)); end
         end
     end
     local measurement = tr("measurement_wait");

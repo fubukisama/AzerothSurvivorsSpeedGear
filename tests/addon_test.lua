@@ -542,10 +542,19 @@ SlashCmdList.AZSSPEEDGEAR("2");
 local launcherCaption = AZSSpeedGearI18n.Text("launcher");
 check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == launcherCaption .. " …",
     "new x2 request shows pending rather than an unverified success");
-advanceUI(4, 2);
+advanceUI(2, 2);
+check(AZSSpeedGear.controller.measured and AZSSpeedGear.controller.confirmedSpeed100 == nil
+    and not AZSSpeedGear.controller.measurementMismatch, "wide interval remains uncertain even when its point estimate matches x2");
+check(hasPanelText(string.format(AZSSpeedGearI18n.Text("target_wait"), "2"))
+    and not hasPanelText(AZSSpeedGearI18n.Text("below_target")), "uncertainty is shown as measuring rather than a false speed mismatch");
+advanceUI(2, 2);
 check(AZSSpeedGear.controller.measured and math.abs(AZSSpeedGear.controller.measured - 2) < 0.05, "launcher x2 confirmation uses independent raw progress");
 check(not AZSSpeedGear.panel.shown and AZSSpeedGear.launcher.text == launcherCaption .. " ×2",
     "confirmed x2 appears on launcher while main panel is hidden");
+SlashCmdList.AZSSPEEDGEAR("2");
+advanceUI(4, 4);
+check(AZSSpeedGear.controller.measurementMismatch and AZSSpeedGear.controller.confirmedSpeed100 == nil
+    and hasPanelText(AZSSpeedGearI18n.Text("below_target")), "independent x4 progress against requested x2 reports a generic mismatch, not a successful speed");
 
 SlashCmdList.AZSSPEEDGEAR("5");
 check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == launcherCaption .. " …",
