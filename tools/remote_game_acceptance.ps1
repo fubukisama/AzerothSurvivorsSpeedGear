@@ -38,12 +38,25 @@ function Get-OfficialGame {
     # Reuse the bounded, same-origin, SHA/size-verified latest-EXE downloader.
     # The historical RAR supplies only MPQ assets; its old EXE is never executed.
     $python = @'
-import hashlib,json,sys,time
+import hashlib,json,os,re,sys,threading,time
+from http.client import HTTPException
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import build_opener,HTTPRedirectHandler,Request
 from urllib.error import HTTPError,URLError
 stage='import_monitor'; identity=None; total=0
+attempts=0; resumes=0; restarts=0; expected_total=None; watchdog=None
+emit_lock=threading.Lock(); emitted=False
+def emit_result(value):
+    global emitted
+    with emit_lock:
+        if emitted: return False
+        emitted=True
+        print(json.dumps(value),flush=True)
+        return True
+def download_deadline():
+    diagnostic={'stage':'assets_download','category':'timeout','exceptionType':'TimeoutError','causeTypes':['TimeoutError'],'httpStatus':None,'assetsBytes':total,'assetsAttempts':attempts,'rangeResumes':resumes,'rangeRestarts':restarts,'expectedAssetsBytes':expected_total}
+    if emit_result({'ok':False,'identity':identity,'diagnostic':diagnostic}): os._exit(2)
 try:
     sys.path.insert(0,str(Path(sys.argv[1])/'tools'))
     import check_game_compatibility as m
@@ -62,21 +75,75 @@ try:
             if p.scheme!='https' or p.hostname!='wow.aethus.pl' or p.port not in (None,443) or p.path!='/download/AzerothSurvivorsWindowsNew.rar' or p.query or p.fragment or p.username or p.password:
                 raise AssetPolicyError('redirect_policy')
             return super().redirect_request(req,fp,code,msg,headers,newurl)
-    digest=hashlib.sha256(); deadline=time.monotonic()+600
-    stage='assets_open'
-    with build_opener(RarRedirect()).open(Request(url,headers={'Accept-Encoding':'identity','User-Agent':m.PRODUCT+'-remote-acceptance/1'}),timeout=30) as r,(root/'official-assets.rar').open('wb') as f:
-        if r.geturl()!=url: raise AssetPolicyError('final_url_policy')
-        stage='assets_download'
-        while True:
-            if time.monotonic()>deadline: raise TimeoutError('download_deadline')
-            chunk=getattr(r,'read1',r.read)(65536)
-            if not chunk: break
-            total+=len(chunk)
-            if total>1024*1024*1024: raise m.IntegrityError('asset_size_limit')
-            digest.update(chunk); f.write(chunk)
+    digest=hashlib.sha256(); deadline=time.monotonic()+600; validator=None
+    maximum=1024*1024*1024; archive=root/'official-assets.rar'
+    # A blocked read may otherwise exceed the overall deadline by its socket
+    # timeout. The watchdog emits only safe JSON, then ends this downloader.
+    watchdog=threading.Timer(600,download_deadline); watchdog.daemon=True; watchdog.start()
+    complete=False
+    for attempt in range(1,4):
+        attempts=attempt
+        requested=total
+        headers={'Accept-Encoding':'identity','User-Agent':m.PRODUCT+'-remote-acceptance/1','Range':f'bytes={requested}-'}
+        if requested and validator: headers['If-Range']=validator
+        try:
+            stage='assets_open'
+            remaining=deadline-time.monotonic()
+            if remaining<=0: raise TimeoutError('download_deadline')
+            with build_opener(RarRedirect()).open(Request(url,headers=headers),timeout=min(90,remaining)) as r:
+                if r.geturl()!=url: raise AssetPolicyError('final_url_policy')
+                if r.headers.get('Content-Encoding','identity').lower()!='identity': raise AssetPolicyError('content_encoding')
+                status=r.status; content_range=r.headers.get('Content-Range'); length=r.headers.get('Content-Length')
+                if length is not None and re.fullmatch(r'[0-9]+',length) is None: raise AssetPolicyError('content_length')
+                declared=int(length) if length is not None else None
+                etag=r.headers.get('ETag')
+                current_validator=etag if etag and not etag.startswith('W/') else r.headers.get('Last-Modified')
+                if status==206:
+                    span=re.fullmatch(r'bytes ([0-9]+)-([0-9]+)/([0-9]+)',content_range or '')
+                    if span is None: raise AssetPolicyError('content_range')
+                    start,end,full=map(int,span.groups())
+                    if start!=requested or not 0<=start<=end<full<=maximum: raise AssetPolicyError('range_bounds')
+                    if expected_total is not None and full!=expected_total: raise AssetPolicyError('range_total_changed')
+                    if validator and current_validator and validator!=current_validator: raise AssetPolicyError('range_identity_changed')
+                    response_bytes=end-start+1
+                    if declared is not None and declared!=response_bytes: raise AssetPolicyError('range_length')
+                    expected_total=full
+                    if requested: resumes+=1
+                    mode='ab' if requested else 'wb'
+                elif status==200:
+                    if content_range is not None: raise AssetPolicyError('unexpected_content_range')
+                    if declared is not None and not 1<=declared<=maximum: raise AssetPolicyError('content_length_bounds')
+                    # A server may ignore Range or fail If-Range. Its full body
+                    # can only restart at offset zero; never append a 200 body.
+                    if requested: restarts+=1
+                    total=0; digest=hashlib.sha256(); expected_total=declared
+                    response_bytes=declared; mode='wb'
+                else: raise AssetPolicyError('unexpected_response_status')
+                validator=current_validator
+                stage='assets_download'; received=0
+                with archive.open(mode) as f:
+                    while response_bytes is None or received<response_bytes:
+                        if time.monotonic()>=deadline: raise TimeoutError('download_deadline')
+                        capacity=65536 if response_bytes is None else min(65536,response_bytes-received)
+                        chunk=getattr(r,'read1',r.read)(capacity)
+                        if not chunk: break
+                        if total+len(chunk)>maximum: raise m.IntegrityError('asset_size_limit')
+                        f.write(chunk); digest.update(chunk); total+=len(chunk); received+=len(chunk)
+                if response_bytes is not None and received!=response_bytes: raise ConnectionError('incomplete_response')
+                if expected_total is None or total==expected_total: complete=True; break
+                # A valid shorter 206 segment may need one further range.
+                if total>expected_total: raise AssetPolicyError('response_exceeds_total')
+                if attempt==3: raise ConnectionError('incomplete_archive')
+        except (TimeoutError,URLError,ConnectionError,HTTPException) as retry_error:
+            if isinstance(retry_error,HTTPError) and retry_error.code not in (408,429,500,502,503,504): raise
+            if attempt==3 or time.monotonic()>=deadline: raise
+            time.sleep(min(2*attempt,max(0,deadline-time.monotonic())))
+    if not complete or total<=0 or (expected_total is not None and total!=expected_total): raise m.IntegrityError('incomplete_archive')
+    watchdog.cancel()
     identity['assetsSha256']=digest.hexdigest()
-    print(json.dumps({'ok':True,'identity':identity,'diagnostic':{'stage':'complete','category':'none','exceptionType':None,'causeTypes':[],'httpStatus':None,'assetsBytes':total}}))
+    emit_result({'ok':True,'identity':identity,'diagnostic':{'stage':'complete','category':'none','exceptionType':None,'causeTypes':[],'httpStatus':None,'assetsBytes':total,'assetsAttempts':attempts,'rangeResumes':resumes,'rangeRestarts':restarts,'expectedAssetsBytes':expected_total}})
 except Exception as error:
+    if watchdog is not None: watchdog.cancel()
     # No exception messages, URLs, tracebacks, response bodies or local paths.
     # Preserve wrapped HTTP causes from the existing monitor, at most 8 nodes.
     pending=[error]; seen=set(); types=[]; status=None
@@ -97,7 +164,7 @@ except Exception as error:
     elif 'AssetPolicyError' in types: category='origin_policy'
     elif any(name in ('PermissionError','FileNotFoundError','IsADirectoryError') for name in types): category='filesystem'
     elif any(name in ('URLError','OSError','ConnectionError','ConnectionResetError') for name in types): category='network'
-    print(json.dumps({'ok':False,'identity':identity,'diagnostic':{'stage':stage,'category':category,'exceptionType':type(error).__name__[:64],'causeTypes':types,'httpStatus':status,'assetsBytes':total}}))
+    emit_result({'ok':False,'identity':identity,'diagnostic':{'stage':stage,'category':category,'exceptionType':type(error).__name__[:64],'causeTypes':types,'httpStatus':status,'assetsBytes':total,'assetsAttempts':attempts,'rangeResumes':resumes,'rangeRestarts':restarts,'expectedAssetsBytes':expected_total}})
     sys.exit(2)
 '@
     $PSNativeCommandUseErrorActionPreference = $false
