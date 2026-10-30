@@ -19,7 +19,7 @@ $package = [IO.Path]::GetFullPath($PackagePath)
 $output = [IO.Path]::GetFullPath($OutputPath)
 if (-not $output.StartsWith($projectRoot + '\acceptance\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Report must be under this checkout acceptance directory.' }
 $utf8 = [Text.UTF8Encoding]::new($false, $true)
-$report = [ordered]@{ schema = 1; product = 'AzerothSurvivorsSpeedGear'; status = 'blocked'; reason = 'not_started'; phase = 'initialized'; exceptionType = $null
+$report = [ordered]@{ schema = 1; product = 'AzerothSurvivorsSpeedGear'; status = 'blocked'; reason = 'not_started'; phase = 'initialized'; exceptionType = $null; downloadDiagnostic = $null
     checkedUtc = [DateTime]::UtcNow.ToString('o'); sourceCommit = $env:GITHUB_SHA; ciRunId = $env:GITHUB_RUN_ID
     gameVersion = $null; gameSha256 = $null; gameBytes = $null; officialAssetsSha256 = $null; candidateDllSha256 = $null; pluginVersion = $null
     renderingRequested = 'DX12 software fallback / Microsoft Basic Render Driver'; runs = @(); criteria = @(); metrics = $null; missingEvidence = @()
@@ -42,34 +42,81 @@ import hashlib,json,sys,time
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import build_opener,HTTPRedirectHandler,Request
-sys.path.insert(0,str(Path(sys.argv[1])/'tools'))
-import check_game_compatibility as m
-root=Path(sys.argv[2])
-opener=build_opener(m.OfficialRedirects())
-manifest=m.fetch_manifest(opener)
-exe=m.download_exe(manifest,root,opener)
-url='https://wow.aethus.pl/download/AzerothSurvivorsWindowsNew.rar'
-class RarRedirect(HTTPRedirectHandler):
-    def redirect_request(self,req,fp,code,msg,headers,newurl):
-        p=urlsplit(newurl)
-        if p.scheme!='https' or p.hostname!='wow.aethus.pl' or p.port not in (None,443) or p.path!='/download/AzerothSurvivorsWindowsNew.rar' or p.query or p.fragment or p.username or p.password:
-            raise ValueError('official asset redirect left its fixed HTTPS URL')
-        return super().redirect_request(req,fp,code,msg,headers,newurl)
-digest=hashlib.sha256(); total=0; deadline=time.monotonic()+600
-with build_opener(RarRedirect()).open(Request(url,headers={'Accept-Encoding':'identity'}),timeout=30) as r,(root/'official-assets.rar').open('wb') as f:
-    if r.geturl()!=url: raise ValueError('unexpected final official assets URL')
-    while True:
-        if time.monotonic()>deadline: raise ValueError('official assets download deadline exceeded')
-        chunk=getattr(r,'read1',r.read)(65536)
-        if not chunk: break
-        total+=len(chunk)
-        if total>1024*1024*1024: raise ValueError('official assets archive exceeds 1 GiB')
-        digest.update(chunk); f.write(chunk)
-print(json.dumps({'version':manifest['version'],'sha256':manifest['sha256'],'size':manifest['size'],'assetsSha256':digest.hexdigest()}))
+from urllib.error import HTTPError,URLError
+stage='import_monitor'; identity=None; total=0
+try:
+    sys.path.insert(0,str(Path(sys.argv[1])/'tools'))
+    import check_game_compatibility as m
+    root=Path(sys.argv[2])
+    opener=build_opener(m.OfficialRedirects())
+    stage='manifest_fetch'
+    manifest=m.fetch_manifest(opener)
+    identity={'version':manifest['version'],'sha256':manifest['sha256'],'size':manifest['size'],'assetsSha256':None}
+    stage='exe_download'
+    exe=m.download_exe(manifest,root,opener)
+    url='https://wow.aethus.pl/download/AzerothSurvivorsWindowsNew.rar'
+    class AssetPolicyError(ValueError): pass
+    class RarRedirect(HTTPRedirectHandler):
+        def redirect_request(self,req,fp,code,msg,headers,newurl):
+            p=urlsplit(newurl)
+            if p.scheme!='https' or p.hostname!='wow.aethus.pl' or p.port not in (None,443) or p.path!='/download/AzerothSurvivorsWindowsNew.rar' or p.query or p.fragment or p.username or p.password:
+                raise AssetPolicyError('redirect_policy')
+            return super().redirect_request(req,fp,code,msg,headers,newurl)
+    digest=hashlib.sha256(); deadline=time.monotonic()+600
+    stage='assets_open'
+    with build_opener(RarRedirect()).open(Request(url,headers={'Accept-Encoding':'identity','User-Agent':m.PRODUCT+'-remote-acceptance/1'}),timeout=30) as r,(root/'official-assets.rar').open('wb') as f:
+        if r.geturl()!=url: raise AssetPolicyError('final_url_policy')
+        stage='assets_download'
+        while True:
+            if time.monotonic()>deadline: raise TimeoutError('download_deadline')
+            chunk=getattr(r,'read1',r.read)(65536)
+            if not chunk: break
+            total+=len(chunk)
+            if total>1024*1024*1024: raise m.IntegrityError('asset_size_limit')
+            digest.update(chunk); f.write(chunk)
+    identity['assetsSha256']=digest.hexdigest()
+    print(json.dumps({'ok':True,'identity':identity,'diagnostic':{'stage':'complete','category':'none','exceptionType':None,'causeTypes':[],'httpStatus':None,'assetsBytes':total}}))
+except Exception as error:
+    # No exception messages, URLs, tracebacks, response bodies or local paths.
+    # Preserve wrapped HTTP causes from the existing monitor, at most 8 nodes.
+    pending=[error]; seen=set(); types=[]; status=None
+    while pending and len(seen)<8:
+        node=pending.pop(0)
+        if id(node) in seen: continue
+        seen.add(id(node)); name=type(node).__name__[:64]
+        if name not in types: types.append(name)
+        if isinstance(node,HTTPError) and isinstance(node.code,int) and 100<=node.code<=599: status=node.code
+        for nested in (node.__cause__,node.__context__,getattr(node,'reason',None)):
+            if isinstance(nested,BaseException): pending.append(nested)
+    category='unexpected'
+    if status is not None: category='http'
+    elif any('SSL' in name or 'Certificate' in name for name in types): category='tls'
+    elif any('Timeout' in name for name in types): category='timeout'
+    elif any(name in ('IntegrityError','BadGzipFile') for name in types): category='integrity'
+    elif 'ManifestError' in types: category='manifest'
+    elif 'AssetPolicyError' in types: category='origin_policy'
+    elif any(name in ('PermissionError','FileNotFoundError','IsADirectoryError') for name in types): category='filesystem'
+    elif any(name in ('URLError','OSError','ConnectionError','ConnectionResetError') for name in types): category='network'
+    print(json.dumps({'ok':False,'identity':identity,'diagnostic':{'stage':stage,'category':category,'exceptionType':type(error).__name__[:64],'causeTypes':types,'httpStatus':status,'assetsBytes':total}}))
+    sys.exit(2)
 '@
+    $PSNativeCommandUseErrorActionPreference = $false
     $lines = @(& python -c $python $script:projectRoot $script:fixtureRoot 2>$null)
-    if ($LASTEXITCODE -ne 0 -or $lines.Count -ne 1) { throw 'blocked_download' }
-    return $lines[0] | ConvertFrom-Json
+    $pythonExit = $LASTEXITCODE
+    $script:report.downloadDiagnostic = [ordered]@{ stage = 'python_host'; category = 'no_bounded_json'; pythonExitCode = $pythonExit }
+    if ($lines.Count -ne 1 -or ([string]$lines[0]).Length -gt 2048) { throw 'blocked_download' }
+    try { $result = $lines[0] | ConvertFrom-Json } catch { throw 'blocked_download' }
+    if ($null -eq $result.PSObject.Properties['ok'] -or $result.ok -isnot [bool] -or
+        $null -eq $result.PSObject.Properties['diagnostic']) { throw 'blocked_download' }
+    $script:report.downloadDiagnostic = $result.diagnostic
+    $script:report.downloadDiagnostic | Add-Member -NotePropertyName pythonExitCode -NotePropertyValue $pythonExit
+    if ($null -ne $result.identity) {
+        $script:report.gameVersion = $result.identity.version
+        $script:report.gameSha256 = $result.identity.sha256
+        $script:report.gameBytes = $result.identity.size
+    }
+    if ($pythonExit -ne 0 -or -not $result.ok) { throw 'blocked_download' }
+    return $result.identity
 }
 
 function Expand-OnlyOfficialAssets([string]$Destination) {
@@ -401,5 +448,5 @@ try {
     # all downloaded files, process-created settings and unredistributed assets.
     Write-Text $output ($report | ConvertTo-Json -Depth 9)
 }
-Write-Output ($report | Select-Object schema,product,status,reason,gameVersion | ConvertTo-Json -Compress)
+Write-Output ([pscustomobject]$report | Select-Object schema,product,status,reason,phase,gameVersion,downloadDiagnostic | ConvertTo-Json -Compress -Depth 5)
 exit $exitCode
