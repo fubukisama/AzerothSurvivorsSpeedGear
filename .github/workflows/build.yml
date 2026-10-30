@@ -34,6 +34,8 @@ jobs:
         run: cmake --build build --config Release --parallel 4
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Save debounce regression model
+        run: python tests/debounce_test.py
       - name: Package
         run: ./scripts/Package.ps1
       - uses: actions/upload-artifact@v4

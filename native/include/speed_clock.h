@@ -5,6 +5,31 @@
 
 namespace azsg {
 
+// Extend an unsigned wrapping millisecond API without changing its native
+// resolution or origin. Sample under the same lock that protects VirtualClock;
+// the real API must be monotonic modulo 2^32 and sampled at least once per wrap.
+class WrappingCounter32 {
+public:
+    std::uint64_t sample(std::uint32_t raw) noexcept {
+        if (!initialized_) {
+            previous_ = raw;
+            extended_ = raw;
+            initialized_ = true;
+            return extended_;
+        }
+        const auto delta = static_cast<std::uint32_t>(raw - previous_);
+        previous_ = raw;
+        constexpr auto limit = std::numeric_limits<std::uint64_t>::max();
+        if (delta > limit - extended_) extended_ = limit;
+        else extended_ += delta;
+        return extended_;
+    }
+private:
+    std::uint32_t previous_ = 0;
+    std::uint64_t extended_ = 0;
+    bool initialized_ = false;
+};
+
 // Integer version of the continuous-clock approach used by AZS Speed Controller
 // (MIT, AZS Speed Controller contributors). The caller must hold its clock lock
 // BEFORE reading real time. This class deliberately performs no synchronization.

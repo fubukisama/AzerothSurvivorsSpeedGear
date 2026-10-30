@@ -106,6 +106,35 @@ void test_limits() {
     expect(offset.sample(137) == 370, "nonzero origin and fractional rate");
 }
 
+void test_wrapping_multimedia_clock() {
+    azsg::WrappingCounter32 counter;
+    expect(counter.sample(0xfffffff0u) == 0xfffffff0ull,
+           "multimedia counter preserves native DWORD origin");
+    expect(counter.sample(0xfffffff1u) == 0xfffffff1ull,
+           "multimedia counter preserves one-millisecond progress");
+    expect(counter.sample(0xfffffff1u) == 0xfffffff1ull,
+           "duplicate multimedia sample adds no time");
+    expect(counter.sample(0xffffffffu) == 0xffffffffull,
+           "multimedia counter reaches DWORD limit");
+    expect(counter.sample(0u) == 0x100000000ull,
+           "DWORD wrap extends by one tick instead of regressing");
+    expect(counter.sample(1u) == 0x100000001ull,
+           "millisecond progress continues after wrap");
+
+    azsg::WrappingCounter32 scaled_counter;
+    azsg::VirtualClock scaled_clock;
+    const auto start = scaled_counter.sample(0xfffffff8u);
+    expect(scaled_clock.set_speed(start, 500), "wrapped multimedia clock accepts 5x");
+    expect(scaled_clock.sample(scaled_counter.sample(0xfffffffeu)) == start + 30,
+           "scaled multimedia progress retains native precision before wrap");
+    expect(scaled_clock.sample(scaled_counter.sample(2u)) == start + 50,
+           "scaled multimedia clock remains continuous through wrap");
+    expect(scaled_clock.set_speed(scaled_counter.sample(4u), 50),
+           "wrapped multimedia clock can change to half speed");
+    expect(scaled_clock.sample(scaled_counter.sample(6u)) == start + 61,
+           "rate change after wrap settles old interval and preserves fractions");
+}
+
 void test_protocol() {
     const auto command = azsg::parse_command("SG1|123|7|1793318400|250|1");
     expect(command.has_value(), "canonical command parses");
@@ -156,6 +185,7 @@ int main() {
     test_fractional_reads();
     test_backward_samples();
     test_limits();
+    test_wrapping_multimedia_clock();
     test_protocol();
     std::cout << assertions << " assertions, " << failures << " failures\n";
     return failures == 0 ? 0 : 1;

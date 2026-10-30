@@ -53,9 +53,20 @@ does not stop its heartbeat. Each new run starts at 1x. Selection screens and
 pauses request normal speed, then resume the rate chosen for that run. Multiplayer
 or an unknown party state prevents activation.
 
-Control uses the game's CVar persistence, so a request, including the stop button,
-normally takes about one second to reach the backend. If fresh control heartbeats
-stop, the backend returns to 1x after eight real seconds.
+Version 0.3.0 queries the control CVar with `ConsoleExec` after setting it. The
+native component receives this synchronous console message through local stdout
+and stderr pipes, so switching and stopping no longer wait for a config save.
+Unrelated console output is forwarded unchanged and is not recorded. The config
+file remains a fallback if game logging or a future update disables this path.
+Queries pulse once per real second; persisted payloads refresh every five seconds,
+allowing the game's save debounce to complete even at 0.25x. Both transports share
+session and sequence validation, so a delayed file cannot undo a newer request.
+If fresh control heartbeats stop, the backend returns to 1x after eight real seconds.
+
+The launcher confirms actual speed using a complete one-second observation window
+after the next integer-second boundary (usually 1–2 seconds). This display delay
+is separate from command delivery. Small measurement fluctuations retain an
+existing confirmation; a new request, substantial mismatch or freeze clears it.
 
 ## Compatibility
 

@@ -1,5 +1,52 @@
 # Validation — 2026-10-30
 
+## Version 0.3.0 switching and clock stability
+
+The old DLL reproduced a multimedia-timer resolution regression: an original
+timeGetTime short-gap step of at most 3ms became 16ms at 1x and up to 80ms at 5x.
+The native transition probe now reads the original multimedia clock, unwraps its
+32-bit rollover under the shared clock lock, and continuously scales that domain.
+The same probe reports at most 3ms at 1x and 15ms at 5x; QPC has no backwards
+samples or out-of-envelope transitions in this fixture. These are observed
+steps, not a latency or frame-time guarantee on every machine.
+
+The old native DLL also failed the immediate-console-delivery regression (16
+failures; commands were not delivered within 400ms without a config save). The
+same actual-DLL host now passes: eight alternating requests across stdout and
+stderr, including split lines, reached the hooked clocks with a maximum observed
+delivery measurement of 26.1ms. Delayed config copies cannot revert newer console
+requests; the file-only fallback still works. A shared command gate checks strict
+payload grammar, freshness, sequence, retired sessions and the eight-real-second
+watchdog. Stale exact console replays cannot keep the watchdog alive.
+
+The deterministic save-debounce model reproduces the old 0.25x oscillation:
+three-real-second CVar mutations repeatedly restart a one-scaled-second quiet
+period, starving saves until the native watchdog restores 1x. Separating live
+queries from five-second persisted refreshes removes that loop in the model.
+Run it with `python tests/debounce_test.py` (seven checks). This model cannot
+establish real-client IO timing or behavior under every unrelated CVar mutation.
+
+All nine local CTest suites pass. NativeCore has 10,098 assertions; CommandGate
+has 21 checks; Lua 5.0 addon wiring has 161 checks and localization has 1,211.
+The Lua regression first failed the old three-second confirmation logic, then
+passed with an integer-boundary anchor followed by one complete second of actual
+game-time observation. Confirmation enters within 10% of the target and remains
+within 20%; substantial mismatch, frozen time, pause and new requests clear it.
+Successful measurement clears the stale switching notice. Neither the test nor
+the UI treats the requested rate as proof that native acceleration worked.
+
+Version 0.3.0 was installed using the owned-version installer while the actual
+game was stopped. Game EXE, avrt.dll, shared config and shared saved variables
+were hash-identical immediately after installation. The real client 0.130.0
+loads the DLL, verifies the simulation site and opens the localized addon panel.
+The new console path and combat switching in that client still require live
+acceptance; the isolated-host timings above are not real gameplay measurements.
+
+Transport design references: [game ConsoleExec implementation](https://github.com/samwhosung/benilla/blob/main/benilla-app/src/console.rs),
+[Rust Windows stdio handle lookup](https://github.com/rust-lang/rust/blob/1.92.0/library/std/src/sys/stdio/windows.rs),
+[Bevy default stderr writer](https://github.com/bevyengine/bevy/blob/v0.18.1/crates/bevy_log/src/lib.rs).
+Runtime code does not hardcode addresses from those sources.
+
 ## Version 0.2.1 launcher rate
 
 The launcher now shows the requested rate only after a fresh measured rate is

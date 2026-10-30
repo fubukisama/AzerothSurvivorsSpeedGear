@@ -14,6 +14,8 @@
 #include "pe_image.h"
 #include "speed_clock.h"
 #include "command.h"
+#include "command_gate.h"
+#include "console_bridge.h"
 #include "language_bridge.h"
 
 namespace {
@@ -29,6 +31,7 @@ TimeFn realTime=nullptr;
 SleepFn realSleep=nullptr;
 std::mutex clockMutex;
 azsg::VirtualClock qpcClock,tickClock,timeClock;
+azsg::WrappingCounter32 multimediaCounter;
 std::atomic<unsigned> speed{100};
 std::atomic<std::uint64_t> simulationCalls{0};
 std::uintptr_t imageBase=0;
@@ -36,6 +39,8 @@ azsg::SimulationSite site{};
 std::filesystem::path root;
 std::mutex logMutex;
 bool productionGame = false;
+std::mutex commandMutex;
+azsg::CommandGate commandGate;
 
 void log(const std::string& text) {
     std::lock_guard<std::mutex> guard(logMutex);
@@ -66,8 +71,8 @@ void setSpeed(unsigned next,const char* why) {
         LARGE_INTEGER qpc{};realQpc(&qpc);
         qpcClock.set_speed(static_cast<std::uint64_t>(qpc.QuadPart),next);
         auto ticks=realTick64();tickClock.set_speed(ticks,next);
-        // timeGetTime is a wrapping 32-bit API: derive its elapsed ticks from the same real 64-bit clock.
-        timeClock.set_speed(ticks,next);
+        // Keep multimedia timer resolution; GetTickCount64 can quantize to 16ms.
+        timeClock.set_speed(multimediaCounter.sample(realTime()),next);
         speed.store(next,std::memory_order_release);
     }
     log("speed100="+std::to_string(next)+" reason="+why+" simulation_calls="+std::to_string(simulationCalls.load()));
@@ -88,7 +93,7 @@ ULONGLONG WINAPI hookedTick64() {
 }
 DWORD WINAPI hookedTime() {
     std::lock_guard<std::mutex> guard(clockMutex);
-    return static_cast<DWORD>(timeClock.sample(realTick64()));
+    return static_cast<DWORD>(timeClock.sample(multimediaCounter.sample(realTime())));
 }
 __declspec(noinline) void hookedRustSleep(std::uint64_t seconds,std::uint32_t nanos) {
     auto caller=reinterpret_cast<std::uintptr_t>(_ReturnAddress());
@@ -102,6 +107,12 @@ std::uint64_t unixSeconds() {
     FILETIME ft{};GetSystemTimeAsFileTime(&ft);
     return ((std::uint64_t(ft.dwHighDateTime)<<32)|ft.dwLowDateTime)/10000000-11644473600ull;
 }
+void receiveCommand(std::string_view text,azsg::CommandSource source) {
+    std::lock_guard<std::mutex> guard(commandMutex);
+    if(auto next=commandGate.accept(text,source,unixSeconds(),realTick64()))
+        setSpeed(*next,source==azsg::CommandSource::console?"addon-console":"addon-file");
+}
+void receiveConsole(std::string_view text) {receiveCommand(text,azsg::CommandSource::console);}
 std::string mailbox() {
     const auto file=root/L"benilla-config"/L"config.toml";
     std::error_code error;auto length=std::filesystem::file_size(file,error);
@@ -130,7 +141,7 @@ DWORD WINAPI worker(void*) {
     productionGame=_wcsicmp(exe.filename().c_str(),L"AzerothSurvivors.exe")==0;
     if(!productionGame && _wcsicmp(exe.filename().c_str(),L"AZSSpeedGearTestHost.exe")!=0) return 0;
     root=exe.parent_path();
-    log("AZSSpeedGear 0.2.0 start; default=1x; protocol=SG1");
+    log("AZSSpeedGear 0.3.0 start; default=1x; protocol=SG1");
     // Locale synchronization remains available even if a future timing layout is refused.
     auto localeThread=CreateThread(nullptr,0,languageWorker,nullptr,0,nullptr);
     if(localeThread) CloseHandle(localeThread);
@@ -151,28 +162,27 @@ DWORD WINAPI worker(void*) {
         MH_CreateHook(reinterpret_cast<void*>(imageBase+site.sleep_rva),reinterpret_cast<void*>(hookedRustSleep),reinterpret_cast<void**>(&realSleep))==MH_OK;
     if(ok) {
         LARGE_INTEGER qpc{};realQpc(&qpc);qpcClock.sample(qpc.QuadPart);
-        auto ticks=realTick64();tickClock.sample(ticks);timeClock.sample(ticks);
+        auto ticks=realTick64();tickClock.sample(ticks);
+        {
+            std::lock_guard<std::mutex> guard(clockMutex);
+            timeClock.sample(multimediaCounter.sample(realTime()));
+        }
         ok=MH_EnableHook(MH_ALL_HOOKS)==MH_OK;
     }
     if(!ok) { MH_DisableHook(MH_ALL_HOOKS);MH_Uninitialize();log("disabled: hooks-failed; game remains at 1x");return 0; }
     log("ready: waiting for fresh in-game AddOn heartbeat");
+    log(azsg::start_console_bridge(receiveConsole)?"control-bridge=console+file":"control-bridge=file-fallback");
     std::string previous=mailbox();
-    std::uint64_t lastBeat=0,currentSession=0,lastSequence=0;
-    bool hadCommand=false;
     while(true) {
         Sleep(100);
-        // Run this before parsing: malformed/replayed commands must never starve the watchdog.
-        if(hadCommand && realTick64()-lastBeat>8000) {setSpeed(100,"heartbeat-timeout");hadCommand=false;}
+        {
+            std::lock_guard<std::mutex> guard(commandMutex);
+            if(commandGate.expire(realTick64())) setSpeed(100,"heartbeat-timeout");
+        }
         auto text=mailbox();
         if(!text.empty() && text!=previous) {
             previous=text;
-            auto command=azsg::parse_command(text);
-            auto now=unixSeconds();
-            if(!command || command->unix_seconds>now+2 || now>command->unix_seconds+8) {setSpeed(100,"invalid-or-stale-command");continue;}
-            if(command->session!=currentSession) {currentSession=command->session;lastSequence=0;setSpeed(100,"new-addon-session");}
-            if(command->sequence<=lastSequence) continue;
-            lastSequence=command->sequence;lastBeat=realTick64();hadCommand=true;
-            setSpeed(command->active?command->speed100:100,command->active?"addon-playing":"addon-inactive");
+            receiveCommand(text,azsg::CommandSource::file);
         }
     }
 }

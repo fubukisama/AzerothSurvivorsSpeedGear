@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.21)
-project(AZSSpeedGear VERSION 0.2.1 LANGUAGES C CXX ASM_MASM)
+project(AZSSpeedGear VERSION 0.3.0 LANGUAGES C CXX ASM_MASM)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_subdirectory(third_party/minhook EXCLUDE_FROM_ALL)
 configure_file(native/proxy.asm "${CMAKE_CURRENT_BINARY_DIR}/proxy.asm" COPYONLY)
 configure_file(tests/simulation_fixture.asm "${CMAKE_CURRENT_BINARY_DIR}/simulation_fixture.asm" COPYONLY)
-add_library(AZSSpeedGear SHARED native/backend.cpp native/language_bridge.cpp native/pe_image.cpp native/proxy.cpp "${CMAKE_CURRENT_BINARY_DIR}/proxy.asm" native/proxy.def)
+add_library(AZSSpeedGear SHARED native/backend.cpp native/console_bridge.cpp native/language_bridge.cpp native/pe_image.cpp native/proxy.cpp "${CMAKE_CURRENT_BINARY_DIR}/proxy.asm" native/proxy.def)
 target_include_directories(AZSSpeedGear PRIVATE native/include)
 target_compile_definitions(AZSSpeedGear PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
 target_compile_options(AZSSpeedGear PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/utf-8> $<$<COMPILE_LANGUAGE:CXX>:/W4>)
@@ -22,6 +22,10 @@ if(BUILD_TESTING)
   target_include_directories(native_core_test PRIVATE native/include)
   target_compile_options(native_core_test PRIVATE /utf-8 /W4)
   add_test(NAME NativeCore COMMAND native_core_test)
+  add_executable(command_gate_test tests/command_gate_test.cpp)
+  target_include_directories(command_gate_test PRIVATE native/include)
+  target_compile_options(command_gate_test PRIVATE /utf-8 /W4)
+  add_test(NAME CommandGate COMMAND command_gate_test)
   add_executable(language_bridge_test tests/language_bridge_test.cpp native/language_bridge.cpp)
   target_include_directories(language_bridge_test PRIVATE native/include)
   target_compile_definitions(language_bridge_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
@@ -36,6 +40,40 @@ if(BUILD_TESTING)
   add_dependencies(clock_host_test AZSSpeedGear)
   add_test(NAME NativeIntegration COMMAND clock_host_test)
   set_tests_properties(NativeIntegration PROPERTIES TIMEOUT 45)
+  add_executable(fast_bridge_test tests/fast_bridge_test.cpp "${CMAKE_CURRENT_BINARY_DIR}/simulation_fixture.asm")
+  set_target_properties(fast_bridge_test PROPERTIES OUTPUT_NAME AZSSpeedGearTestHost
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fast-bridge-bin")
+  target_compile_definitions(fast_bridge_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_compile_options(fast_bridge_test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/utf-8> $<$<COMPILE_LANGUAGE:CXX>:/W4>)
+  add_dependencies(fast_bridge_test AZSSpeedGear)
+  add_test(NAME FastBridge COMMAND "${AZSG_POWERSHELL}" -NoProfile -Command
+    "$ErrorActionPreference='Stop'
+     $directory=Join-Path '${CMAKE_CURRENT_BINARY_DIR}/fast-bridge-runs' ([guid]::NewGuid().ToString('N'))
+     New-Item -ItemType Directory -Path $directory -Force | Out-Null
+     Copy-Item -LiteralPath '$<TARGET_FILE:fast_bridge_test>' -Destination (Join-Path $directory 'AZSSpeedGearTestHost.exe')
+     Copy-Item -LiteralPath '$<TARGET_FILE:AZSSpeedGear>' -Destination (Join-Path $directory 'dwmapi.dll')
+     & (Join-Path $directory 'AZSSpeedGearTestHost.exe')
+     exit $LASTEXITCODE")
+  set_tests_properties(FastBridge PROPERTIES TIMEOUT 15 RUN_SERIAL TRUE)
+  add_executable(transition_probe tests/transition_probe.cpp "${CMAKE_CURRENT_BINARY_DIR}/simulation_fixture.asm")
+  set_target_properties(transition_probe PROPERTIES
+    OUTPUT_NAME AZSSpeedGearTestHost
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/transition-probe-bin")
+  target_compile_definitions(transition_probe PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+  target_compile_options(transition_probe PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/utf-8> $<$<COMPILE_LANGUAGE:CXX>:/W4>)
+  target_link_libraries(transition_probe PRIVATE winmm)
+  add_dependencies(transition_probe AZSSpeedGear)
+  # Every run gets its own fake config/log directory; repeated CTest runs never
+  # overwrite another probe or interact with the installed game or APPDATA.
+  add_test(NAME NativeTransitions COMMAND "${AZSG_POWERSHELL}" -NoProfile -Command
+    "$ErrorActionPreference='Stop'
+     $directory=Join-Path '${CMAKE_CURRENT_BINARY_DIR}/transition-probe-runs' ([guid]::NewGuid().ToString('N'))
+     New-Item -ItemType Directory -Path $directory -Force | Out-Null
+     Copy-Item -LiteralPath '$<TARGET_FILE:transition_probe>' -Destination (Join-Path $directory 'AZSSpeedGearTestHost.exe')
+     Copy-Item -LiteralPath '$<TARGET_FILE:AZSSpeedGear>' -Destination (Join-Path $directory 'dwmapi.dll')
+     & (Join-Path $directory 'AZSSpeedGearTestHost.exe') 350 3
+     exit $LASTEXITCODE")
+  set_tests_properties(NativeTransitions PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
   set(LUA50_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.sources/lua-5.0.3" CACHE PATH "Lua 5.0.3 sources for addon compatibility tests")
   if(EXISTS "${LUA50_ROOT}/src/lapi.c")
     file(GLOB lua_sources "${LUA50_ROOT}/src/*.c" "${LUA50_ROOT}/src/lib/*.c")

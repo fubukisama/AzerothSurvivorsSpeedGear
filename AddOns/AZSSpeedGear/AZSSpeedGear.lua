@@ -40,7 +40,10 @@ function Gear.NewController(api)
     self.phase = nil;
     self.solo = nil;
     self.lastSent = nil;
+    self.lastPulse = nil;
     self.measured = nil;
+    self.confirmedSpeed100 = nil;
+    self.measurePendingAt = nil;
     self.measureStart = nil;
     self.measureRun = nil;
     self.previousRun = nil;
@@ -69,6 +72,8 @@ function Gear.NewController(api)
 
     function self:ResetMeasurement()
         self.measured = nil;
+        self.confirmedSpeed100 = nil;
+        self.measurePendingAt = nil;
         self.measureStart = nil;
         self.measureRun = nil;
         self.previousRun = nil;
@@ -90,7 +95,17 @@ function Gear.NewController(api)
             return false;
         end
         self.lastSent = now;
+        self:Pulse(now);
         return true;
+    end
+
+    function self:Pulse(now)
+        if (type(self.api.pulse) == "function") then
+            -- Querying the already-set CVar logs it synchronously without making
+            -- the shared config dirty. Native receives this on its console pipe.
+            pcall(self.api.pulse);
+            self.lastPulse = now;
+        end
     end
 
     function self:Measure(now, run, sampled)
@@ -106,17 +121,32 @@ function Gear.NewController(api)
             end
         end
         self.previousRun = run;
-        if (not self.measureStart or now < self.measureStart) then
+        if (not self.measurePendingAt or now < self.measurePendingAt or (self.measureStart and now < self.measureStart)) then
+            self:ResetMeasurement();
+            self.measurePendingAt = now;
+            self.previousRun = run;
+            return;
+        end
+        if (not self.measureStart) then
+            -- The request can arrive anywhere inside time()'s integer second.
+            -- Start only on a later observed boundary, never backdate its value.
+            if (now <= self.measurePendingAt) then return; end
             self.measureStart = now;
             self.measureRun = run;
-            self.measured = nil;
             return;
         end
         local elapsed = now - self.measureStart;
-        if (elapsed >= 3) then
+        if (elapsed >= 1) then
             local delta = run - self.measureRun;
             self.measured = nil;
             if (delta > 0) then self.measured = delta / elapsed; end
+            local target = self.speed100 / 100;
+            local tolerance = 0.10;
+            if (self.confirmedSpeed100 == self.speed100) then tolerance = 0.20; end
+            if (finiteNumber(self.measured) and self.measured > 0
+                and math.abs(self.measured - target) <= target * tolerance) then
+                self.confirmedSpeed100 = self.speed100;
+            else self.confirmedSpeed100 = nil; end
             self.measureStart = now;
             self.measureRun = run;
         end
@@ -144,8 +174,10 @@ function Gear.NewController(api)
             self.speed100 = allowed and self.desiredSpeed100 or 100;
             self:ResetMeasurement();
             self:Emit(now);
-        elseif (self.bridgeReady and now and (not self.lastSent or now < self.lastSent or now - self.lastSent >= 3)) then
+        elseif (self.bridgeReady and now and (not self.lastSent or now < self.lastSent or now - self.lastSent >= 5)) then
             self:Emit(now);
+        elseif (self.bridgeReady and now and (not self.lastPulse or now < self.lastPulse or now - self.lastPulse >= 1)) then
+            self:Pulse(now);
         end
         -- Reuse this update's native sample: two reads can straddle a correction.
         if (self.active) then self:Measure(now, run, true); else self:ResetMeasurement(); end
@@ -220,7 +252,8 @@ local controller = Gear.NewController({
     isSolo = isSolo,
     runTime = function() if (type(AZS_GetRunTime) == "function") then return AZS_GetRunTime(); end end,
     register = registerBridge,
-    send = function(command) SetCVar(COMMAND_CVAR, command); return true; end
+    send = function(command) SetCVar(COMMAND_CVAR, command); return true; end,
+    pulse = function() if (type(ConsoleExec) == "function") then ConsoleExec(COMMAND_CVAR); end end
 });
 Gear.controller = controller;
 
@@ -268,8 +301,7 @@ end
 
 local function measurementMatchesTarget()
     if (not controller.active or not finiteNumber(controller.measured) or controller.measured <= 0) then return false; end
-    local target = controller.speed100 / 100;
-    return math.abs(controller.measured - target) <= target * 0.10;
+    return controller.confirmedSpeed100 == controller.speed100;
 end
 
 local function updateLauncher()
@@ -319,6 +351,10 @@ end
 
 local function render()
     updateLauncher();
+    if (measurementMatchesTarget() and (noticeKey == "switching" or noticeKey == "stop_sent")) then
+        noticeKey = "hint";
+        if (noticeLabel) then noticeLabel:SetText(tr(noticeKey)); end
+    end
     if (not statusLabel) then return; end
     local status = "";
     if (not controller.bridgeReady) then

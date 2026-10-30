@@ -13,8 +13,8 @@ local function check(condition, message)
     if (not condition) then error(message); end
 end
 
-local function fixture(available)
-    local state = { now = 1800000000, run = 0, phase = "ready", solo = true, sent = {} };
+local function fixture(available, pulseMode)
+    local state = { now = 1800000000, run = 0, phase = "ready", solo = true, sent = {}, pulses = {} };
     local api = {
         now = function() return state.now; end,
         random = function() return 321; end,
@@ -24,12 +24,29 @@ local function fixture(available)
         register = function() return available ~= false; end,
         send = function(command) table.insert(state.sent, command); return true; end
     };
+    if (pulseMode) then
+        api.pulse = function()
+            table.insert(state.pulses, state.now);
+            if (pulseMode == "error") then error("console unavailable"); end
+            return true;
+        end;
+    end
     local controller = AZSSpeedGear.NewController(api);
     return state, controller;
 end
 
 local function latest(state)
     return state.sent[table.getn(state.sent)];
+end
+
+local function advanceFixture(state, controller, seconds, rate)
+    local step = 1;
+    while (step <= seconds) do
+        state.now = state.now + 1;
+        state.run = state.run + rate;
+        controller:Update();
+        step = step + 1;
+    end
 end
 
 local state, controller = fixture();
@@ -45,12 +62,42 @@ local count = table.getn(state.sent);
 state.now = state.now + 2;
 state.run = 10;
 controller:Update();
-check(table.getn(state.sent) == count, "heartbeat not sent before 3 real seconds");
+check(table.getn(state.sent) == count, "fallback heartbeat not sent before five real seconds");
 state.now = state.now + 1;
 state.run = 15;
 controller:Update();
-check(table.getn(state.sent) == count + 1, "heartbeat uses real seconds");
-check(controller.measured == 5, "measured actual x5 over 3 seconds");
+check(table.getn(state.sent) == count, "three seconds no longer dirties fallback config");
+check(controller.measured == 5, "measured actual x5 from the complete aligned observation");
+advanceFixture(state, controller, 2, 5);
+check(table.getn(state.sent) == count + 1, "fallback heartbeat writes at five real seconds");
+
+local pulsed, pulsedController = fixture(true, true);
+pulsed.phase = "playing";
+pulsedController:Update();
+local pulseWrites = table.getn(pulsed.sent);
+local pulseQueries = table.getn(pulsed.pulses);
+pulsedController:RequestSpeed(500);
+check(table.getn(pulsed.sent) == pulseWrites + 1 and table.getn(pulsed.pulses) == pulseQueries + 1,
+    "new request emits immediately and immediately queries its CVar");
+pulseWrites = table.getn(pulsed.sent);
+pulseQueries = table.getn(pulsed.pulses);
+advanceFixture(pulsed, pulsedController, 4, 5);
+check(table.getn(pulsed.pulses) == pulseQueries + 4 and table.getn(pulsed.sent) == pulseWrites,
+    "one-second console pulses keep delivery fresh without dirtying config");
+pulsedController:Update();
+check(table.getn(pulsed.pulses) == pulseQueries + 4, "multiple frame updates in one second do not duplicate console pulses");
+advanceFixture(pulsed, pulsedController, 1, 5);
+check(table.getn(pulsed.sent) == pulseWrites + 1 and table.getn(pulsed.pulses) == pulseQueries + 5,
+    "five-second fallback write includes one query without a duplicate periodic pulse");
+local failedPulse, failedPulseController = fixture(true, "error");
+failedPulse.phase = "playing";
+failedPulseController:Update();
+check(failedPulseController:RequestSpeed(200) and failedPulseController.bridgeReady and failedPulseController.active,
+    "failed console pulse does not disable successful CVar fallback");
+local writesBeforePulseFailure = table.getn(failedPulse.sent);
+advanceFixture(failedPulse, failedPulseController, 5, 2);
+check(table.getn(failedPulse.sent) == writesBeforePulseFailure + 1 and failedPulseController.bridgeReady,
+    "console failure still permits subsequent five-second fallback writes");
 
 state.phase = "choosing";
 controller:Update();
@@ -116,15 +163,11 @@ check(not noPhase.active and string.find(latest(unknown), "|100|0$") ~= nil, "mi
 local measured, meter = fixture();
 measured.phase = "playing";
 meter:Update();
-measured.now = measured.now + 3;
-measured.run = 3;
-meter:Update();
+advanceFixture(measured, meter, 2, 1);
 check(meter.measured == 1, "actual x1 displayed despite requested speed being independent");
 meter:RequestSpeed(500);
 check(meter.measured == nil, "speed request clears old measurement");
-measured.now = measured.now + 3;
-measured.run = measured.run + 3;
-meter:Update();
+advanceFixture(measured, meter, 2, 1);
 check(meter.measured == 1 and meter.speed100 == 500, "failed acceleration is honestly measured x1");
 measured.run = 0;
 meter:Update();
@@ -149,7 +192,7 @@ while (second <= 3) do
     second = second + 1;
 end
 check(runReads == 6, "each Update reads the native run clock once");
-check(jitterMeter.measured == 1, "small server corrections allow a complete three-second measurement");
+check(jitterMeter.measured == 1, "small server corrections preserve complete aligned measurements");
 check(jitterMeter.previousRun == 103, "small rollback retains observed high-water mark");
 -- An unchanged high-water mark is not evidence of a running simulation.
 second = 4;
@@ -164,12 +207,33 @@ check(jitterMeter.measured == nil, "frozen clock with jitter cannot produce a po
 jitter.now = jitter.now + 1;
 jitter.run = 101.5;
 jitterMeter:Update();
-check(jitterMeter.measured == nil and jitterMeter.measureStart == jitter.now and jitterMeter.measureRun == 101.5,
-    "significant rollback clears the measurement and resets its baseline");
-jitter.now = jitter.now + 3;
-jitter.run = 104.5;
-jitterMeter:Update();
+check(jitterMeter.measured == nil and jitterMeter.measureStart == nil,
+    "significant rollback clears measurement and waits for another observed boundary");
+advanceFixture(jitter, jitterMeter, 2, 1);
 check(jitterMeter.measured == 1, "measurement resumes from the significant-rollback baseline");
+
+local aligned, alignedMeter = fixture();
+aligned.phase = "playing";
+aligned.run = 100;
+alignedMeter:Update();
+alignedMeter:RequestSpeed(500);
+aligned.run = 104.5;
+alignedMeter:Update();
+check(alignedMeter.measured == nil and alignedMeter.confirmedSpeed100 == nil,
+    "within-second progress cannot create a partial-window confirmation");
+aligned.now = aligned.now + 1;
+aligned.run = 105;
+alignedMeter:Update();
+check(alignedMeter.measured == nil and alignedMeter.measureRun == 105,
+    "first later integer-second sample becomes an anchor rather than a measured rate");
+aligned.now = aligned.now + 1;
+aligned.run = 110;
+alignedMeter:Update();
+check(alignedMeter.measured == 5 and alignedMeter.confirmedSpeed100 == 500,
+    "one complete boundary-aligned second can confirm the requested speed");
+alignedMeter:RequestSpeed(100);
+check(alignedMeter.measured == nil and alignedMeter.confirmedSpeed100 == nil,
+    "every request invalidates both measured and confirmed state");
 
 local broken, bad = fixture();
 bad.api.send = function() error("unavailable CVar"); end;
@@ -181,11 +245,12 @@ check(not bad.active and not bad.bridgeReady and bad.speed100 == 100, "CVar erro
 local frames = {};
 local cvars = {};
 local writes = {};
+local queries = {};
 local wall = 1800001000;
 local runClock = 0;
 local gamePhase = "playing";
 local function frameStub(name)
-    local frame = { shown = true, scripts = {} };
+    local frame = { shown = true, scripts = {}, fontStrings = {} };
     function frame:SetWidth(value) self.width = value; end
     function frame:SetHeight(value) self.height = value; end
     function frame:SetPoint(point, relative, relativePoint, x, y)
@@ -212,7 +277,11 @@ local function frameStub(name)
     function frame:ClearFocus() end
     function frame:Show() self.shown = true; end
     function frame:Hide() self.shown = false; end
-    function frame:CreateFontString() return frameStub(); end
+    function frame:CreateFontString()
+        local font = frameStub();
+        table.insert(self.fontStrings, font);
+        return font;
+    end
     if (name) then frames[name] = frame; end
     return frame;
 end
@@ -221,6 +290,7 @@ UIParent = frameStub("UIParent");
 CreateFrame = function(kind, name) return frameStub(name); end;
 RegisterCVar = function(name, value) if (not cvars[name]) then cvars[name] = value; end end;
 SetCVar = function(name, value) cvars[name] = value; table.insert(writes, value); end;
+ConsoleExec = function(command) table.insert(queries, command); end;
 GetNumPartyMembers = function() return 0; end;
 GetNumRaidMembers = function() return 0; end;
 AZS_PARTY = {};
@@ -238,6 +308,15 @@ local function fire(name, argument)
     this = driver;
     driver.scripts.OnEvent();
 end
+local function advanceUI(seconds, rate)
+    local step = 1;
+    while (step <= seconds) do
+        wall = wall + 1;
+        runClock = runClock + rate;
+        driver.scripts.OnUpdate();
+        step = step + 1;
+    end
+end
 fire("ADDON_LOADED", "AZSSpeedGear");
 check(not AZSSpeedGear.panel.shown, "saved hidden panel restored");
 check(AZSSpeedGear.panel.x == 35 and AZSSpeedGear.panel.y == -40, "saved position restored");
@@ -247,10 +326,11 @@ SlashCmdList.AZSSPEEDGEAR("2");
 check(AZSSpeedGear.controller.speed100 == 200, "slash speed request reaches CVar bridge");
 SlashCmdList.AZSSPEEDGEAR("hide");
 local beforeHeartbeat = table.getn(writes);
-wall = wall + 3;
-runClock = 3;
-driver.scripts.OnUpdate();
+local queriesBeforeHeartbeat = table.getn(queries);
+advanceUI(5, 1);
 check(table.getn(writes) == beforeHeartbeat + 1, "hidden panel keeps real-time heartbeat");
+check(table.getn(queries) == queriesBeforeHeartbeat + 5 and queries[table.getn(queries)] == "AZSSpeedGearCommand",
+    "hidden panel retains one-second queries of only the owned command CVar");
 check(AZSSpeedGear.controller.measured == 1, "production measurement reports actual x1 for x2 request");
 AZS_PARTY = { { name = "Friend" } };
 driver.scripts.OnUpdate();
@@ -334,9 +414,7 @@ check(AZSSpeedGearDB.launcherX == -92 and AZSSpeedGearDB.launcherY == -128, "pan
 
 local heartbeatWithHiddenLauncher = table.getn(writes);
 AZSSpeedGear.launcher:Hide();
-wall = wall + 3;
-runClock = runClock + 3;
-driver.scripts.OnUpdate();
+advanceUI(5, 1);
 check(table.getn(writes) == heartbeatWithHiddenLauncher + 1 and AZSSpeedGear.controller.active,
     "hiding launcher does not stop independent heartbeat driver");
 fire("PLAYER_LEAVING_WORLD");
@@ -410,9 +488,7 @@ SlashCmdList.AZSSPEEDGEAR("2");
 local launcherCaption = AZSSpeedGearI18n.Text("launcher");
 check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == launcherCaption .. " …",
     "new x2 request shows pending rather than an unverified success");
-wall = wall + 3;
-runClock = runClock + 6;
-driver.scripts.OnUpdate();
+advanceUI(2, 2);
 check(AZSSpeedGear.controller.measured == 2, "launcher x2 confirmation uses measured game progress");
 check(not AZSSpeedGear.panel.shown and AZSSpeedGear.launcher.text == launcherCaption .. " ×2",
     "confirmed x2 appears on launcher while main panel is hidden");
@@ -420,24 +496,18 @@ check(not AZSSpeedGear.panel.shown and AZSSpeedGear.launcher.text == launcherCap
 SlashCmdList.AZSSPEEDGEAR("5");
 check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == launcherCaption .. " …",
     "requesting x5 immediately removes the old confirmed x2 caption");
-wall = wall + 3;
-runClock = runClock + 3;
-driver.scripts.OnUpdate();
+advanceUI(2, 1);
 check(AZSSpeedGear.controller.measured == 1 and AZSSpeedGear.controller.speed100 == 500,
     "failed x5 switch retains honest measured x1");
 check(AZSSpeedGear.launcher.text == launcherCaption .. " …",
     "measured x1 cannot confirm a requested x5 launcher suffix");
 
 SlashCmdList.AZSSPEEDGEAR("0.5");
-wall = wall + 4;
-runClock = runClock + 2;
-driver.scripts.OnUpdate();
+advanceUI(2, 0.5);
 check(AZSSpeedGear.controller.measured == 0.5 and AZSSpeedGear.launcher.text == launcherCaption .. " ×0.5",
     "confirmed fractional x0.5 uses a compact decimal suffix");
 SlashCmdList.AZSSPEEDGEAR("0.5");
-wall = wall + 4;
-runClock = runClock + 1;
-driver.scripts.OnUpdate();
+advanceUI(2, 0.25);
 check(AZSSpeedGear.controller.measured == 0.25, "low-speed mismatch fixture measures actual x0.25");
 check(AZSSpeedGear.launcher.text == launcherCaption .. " …",
     "requested x0.5 with actual x0.25 cannot use the panel's broad absolute tolerance");
@@ -445,9 +515,7 @@ check(AZSSpeedGear.launcher.text == launcherCaption .. " …",
 SlashCmdList.AZSSPEEDGEAR("stop");
 check(AZSSpeedGear.controller.speed100 == 100 and AZSSpeedGear.controller.measured == nil
     and AZSSpeedGear.launcher.text == launcherCaption .. " …", "emergency x1 remains pending until measured");
-wall = wall + 3;
-runClock = runClock + 3;
-driver.scripts.OnUpdate();
+advanceUI(2, 1);
 check(AZSSpeedGear.controller.measured == 1 and AZSSpeedGear.launcher.text == launcherCaption .. " ×1",
     "emergency restore gains a confirmed x1 suffix only after measurement");
 gamePhase = "paused";
@@ -458,9 +526,7 @@ check(not AZSSpeedGear.controller.active and AZSSpeedGear.controller.measured ==
 gamePhase = "playing";
 driver.scripts.OnUpdate();
 SlashCmdList.AZSSPEEDGEAR("2");
-wall = wall + 3;
-runClock = runClock + 6;
-driver.scripts.OnUpdate();
+advanceUI(2, 2);
 check(AZSSpeedGear.launcher.text == launcherCaption .. " ×2", "same-run resumed x2 can be confirmed again");
 local confirmedSpeed = AZSSpeedGear.controller.speed100;
 local confirmedLauncherX = AZSSpeedGear.launcher.x;
@@ -475,5 +541,103 @@ check(AZSSpeedGear.launcher.width > 64 and AZSSpeedGear.launcher.width <= 160,
     "fallback launcher width includes the complete Japanese caption and confirmed suffix");
 check(AZSSpeedGear.controller.speed100 == confirmedSpeed and AZSSpeedGear.launcher.x == confirmedLauncherX
     and AZSSpeedGear.launcher.y == confirmedLauncherY, "confirmed caption localization preserves speed and launcher anchor");
+
+-- Diagnostic baselines: the fixture observes integer time() and immediate CVar
+-- writes only. It cannot measure config-file flushing, native application time,
+-- physical movement, or a 0.2-second duration within the same Unix second.
+gamePhase = "playing";
+AZSSpeedGearNativeLocale = "zh";
+wall = math.floor(wall) + 1;
+fire("PLAYER_LEAVING_WORLD");
+fire("PLAYER_ENTERING_WORLD");
+local baselineCaption = AZSSpeedGearI18n.Text("launcher");
+local function sampleBaseline(seconds, actualRate)
+    advanceUI(seconds, actualRate);
+end
+local writesBeforeRequest = table.getn(writes);
+local requestedAt = wall;
+SlashCmdList.AZSSPEEDGEAR("5");
+check(table.getn(writes) == writesBeforeRequest + 1, "speed request writes CVar without waiting for the measurement window");
+local switchingNotice = nil;
+local noticeIndex = 1;
+while (noticeIndex <= table.getn(AZSSpeedGear.panel.fontStrings)) do
+    local label = AZSSpeedGear.panel.fontStrings[noticeIndex];
+    if (label.text == AZSSpeedGearI18n.Text("switching")) then switchingNotice = label; end
+    noticeIndex = noticeIndex + 1;
+end
+check(switchingNotice ~= nil, "unconfirmed request retains a visible switching notice");
+sampleBaseline(1, 5);
+check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == baselineCaption .. " …",
+    "baseline x5 remains pending after one integer clock tick");
+sampleBaseline(1, 5);
+check(AZSSpeedGear.controller.measured == 5 and AZSSpeedGear.launcher.text == baselineCaption .. " ×5",
+    "x5 confirms after the next whole-second anchor plus one complete observed second");
+check(switchingNotice.text == AZSSpeedGearI18n.Text("hint"), "confirmed speed clears the stale switching notice even with panel hidden");
+print("BASELINE request->CVar=0 fixture ticks; request->launcher-confirm=" .. (wall - requestedAt)
+    .. " integer seconds (perfect immediate x5 response; native latency not modeled)");
+
+local rapidSpeeds = { 100, 500, 100, 500, 100, 500 };
+local rapidIndex = 1;
+while (rapidIndex <= table.getn(rapidSpeeds)) do
+    local nextRate = rapidSpeeds[rapidIndex] / 100;
+    SlashCmdList.AZSSPEEDGEAR(tostring(nextRate));
+    check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == baselineCaption .. " …",
+        "rapid switch immediately removes previous confirmation " .. rapidIndex);
+    sampleBaseline(1, nextRate);
+    check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == baselineCaption .. " …",
+        "rapid switch cannot inherit a previous measurement " .. rapidIndex);
+    rapidIndex = rapidIndex + 1;
+end
+sampleBaseline(1, 5);
+check(AZSSpeedGear.launcher.text == baselineCaption .. " ×5", "rapid-switch sequence confirms only after settling on its final target");
+print("BASELINE rapid 1<->5: 6 requests one integer second apart; stale success captions=0; final confirmation=2 ticks after final request");
+
+local transientPhases = { "choosing", "paused" };
+local transientIndex = 1;
+while (transientIndex <= table.getn(transientPhases)) do
+    local beforeTransient = table.getn(writes);
+    gamePhase = transientPhases[transientIndex];
+    driver.scripts.OnUpdate();
+    check(not AZSSpeedGear.controller.active and AZSSpeedGear.controller.measured == nil
+        and AZSSpeedGear.launcher.text == baselineCaption, "same-second transient clears current confirmation " .. gamePhase);
+    gamePhase = "playing";
+    driver.scripts.OnUpdate();
+    check(AZSSpeedGear.controller.active and AZSSpeedGear.controller.speed100 == 500
+        and AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == baselineCaption .. " …",
+        "same-second resume retains target but restarts confirmation " .. transientPhases[transientIndex]);
+    check(table.getn(writes) == beforeTransient + 2
+        and string.find(writes[beforeTransient + 1], "|100|0$") ~= nil
+        and string.find(writes[beforeTransient + 2], "|500|1$") ~= nil,
+        "same-second transient emits inactive then active commands " .. transientPhases[transientIndex]);
+    sampleBaseline(2, 5);
+    check(AZSSpeedGear.launcher.text == baselineCaption .. " ×5", "transient resume requires a new full measurement window");
+    transientIndex = transientIndex + 1;
+end
+print("BASELINE short choosing/paused: same-second active0->active1, desired x5 retained, confirmation cleared then re-earned after 2 ticks");
+print("SEAM LIMIT: integer time() cannot establish a 0.2s delay or whether both CVar values reached native code before config coalescing");
+
+sampleBaseline(1, 4.4);
+check(AZSSpeedGear.controller.speed100 == 500 and AZSSpeedGear.launcher.text == baselineCaption .. " ×5",
+    "already confirmed x5 survives a small measured-rate deviation without caption flicker");
+sampleBaseline(1, 4.9);
+check(AZSSpeedGear.controller.speed100 == 500 and AZSSpeedGear.launcher.text == baselineCaption .. " ×5",
+    "same target regains its success caption when a later measured window matches");
+print("BASELINE caption variability at fixed target x5: observed windows x5 -> x4.4 -> x4.9 retain confirmed with hysteresis");
+sampleBaseline(1, 1);
+check(AZSSpeedGear.controller.measured == 1 and AZSSpeedGear.controller.confirmedSpeed100 == nil
+    and AZSSpeedGear.launcher.text == baselineCaption .. " …", "a clear speed failure immediately revokes prior confirmation");
+sampleBaseline(1, 4.4);
+check(AZSSpeedGear.controller.confirmedSpeed100 == nil and AZSSpeedGear.launcher.text == baselineCaption .. " …",
+    "hysteresis cannot grant a fresh confirmation outside the strict entry threshold");
+sampleBaseline(1, 4.9);
+check(AZSSpeedGear.controller.confirmedSpeed100 == 500, "matching observation can re-establish confirmation after a real mismatch");
+sampleBaseline(1, 0);
+check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.controller.confirmedSpeed100 == nil
+    and AZSSpeedGear.launcher.text == baselineCaption .. " …", "a frozen run clock cannot retain a successful speed caption");
+ConsoleExec = nil;
+local writesWithoutConsole = table.getn(writes);
+advanceUI(5, 5);
+check(AZSSpeedGear.controller.bridgeReady and AZSSpeedGear.controller.active and table.getn(writes) == writesWithoutConsole + 1,
+    "missing ConsoleExec leaves the real production adapter's CVar fallback working");
 
 print("AZSSpeedGear addon state and protocol: " .. checks .. " checks passed");
