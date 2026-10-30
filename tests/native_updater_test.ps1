@@ -7,7 +7,9 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$modulePathBeforeLibrary = [Environment]::GetEnvironmentVariable('PSModulePath', [EnvironmentVariableTarget]::Process)
 . (Join-Path $projectRoot 'scripts\NativeUpdate.ps1') -LibraryOnly
+$modulePathAfterLibrary = [Environment]::GetEnvironmentVariable('PSModulePath', [EnvironmentVariableTarget]::Process)
 $temporaryBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
 $fixtureRoot = [IO.Path]::GetFullPath((Join-Path $temporaryBase ('AZSSpeedGear-native-updater-tests-' + [guid]::NewGuid().ToString('N'))))
 if (-not $fixtureRoot.StartsWith($temporaryBase + '\', [StringComparison]::OrdinalIgnoreCase) -or
@@ -23,6 +25,32 @@ function Assert-NativeTest([bool]$Condition, [string]$Label) {
     if (-not $Condition) { throw ('FAIL: ' + $Label) }
     $script:checks++
 }
+
+# Exercise host initialization through pure fakes. These calls cannot alter the
+# CI process's own module path, user/machine settings, or any game environment.
+$script:hostFolderCalls = 0
+$script:modulePathAssignments = @()
+$script:fakeHostFolders = [pscustomobject]@{
+    Home = 'C:\FixtureWindows\System32\WindowsPowerShell\v1.0'
+    ProgramFiles = 'C:\FixtureProgramFiles'
+    Documents = 'C:\FixtureDocuments'
+}
+function Get-AZSGNativeHostFolders {
+    $script:hostFolderCalls++
+    return $script:fakeHostFolders
+}
+function Set-AZSGNativeProcessModulePath([string]$Value) {
+    $script:modulePathAssignments += $Value
+}
+Assert-NativeTest ($modulePathBeforeLibrary -ceq $modulePathAfterLibrary) 'LibraryOnly preserves its caller PSModulePath'
+Initialize-AZSGNativeHostEnvironment -Edition 'Desktop' -LibraryMode $true
+Initialize-AZSGNativeHostEnvironment -Edition 'Core' -LibraryMode $false
+Assert-NativeTest ($script:hostFolderCalls -eq 0 -and $script:modulePathAssignments.Count -eq 0) 'library and Core modes do not initialize host environment'
+Initialize-AZSGNativeHostEnvironment -Edition 'Desktop' -LibraryMode $false
+$expectedModulePath = 'C:\FixtureWindows\System32\WindowsPowerShell\v1.0\Modules;C:\FixtureProgramFiles\WindowsPowerShell\Modules;C:\FixtureDocuments\WindowsPowerShell\Modules'
+Assert-NativeTest ($script:hostFolderCalls -eq 1 -and $script:modulePathAssignments.Count -eq 1) 'Desktop run initializes its module path once'
+Assert-NativeTest ($script:modulePathAssignments[0] -ceq $expectedModulePath) 'system PSHOME modules precede known-folder module paths'
+Assert-NativeTest (([Environment]::GetEnvironmentVariable('PSModulePath', [EnvironmentVariableTarget]::Process)) -ceq $modulePathBeforeLibrary) 'environment mocks never mutate the CI host'
 
 function Save-NativeReceipt([string]$Version = '0.5.0') {
     $files = @([pscustomobject]@{

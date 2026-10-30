@@ -8,6 +8,41 @@ param(
     [switch]$LibraryOnly
 )
 
+function Get-AZSGNativeHostFolders {
+    # Use the current host and Windows known folders, never the inherited
+    # PSModulePath/ProgramFiles environment or cmdlets that need those modules.
+    return [pscustomobject]@{
+        Home = $PSHOME
+        ProgramFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+        Documents = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)
+    }
+}
+
+function Set-AZSGNativeProcessModulePath([string]$Value) {
+    [Environment]::SetEnvironmentVariable('PSModulePath', $Value, [EnvironmentVariableTarget]::Process)
+}
+
+function Initialize-AZSGNativeHostEnvironment([string]$Edition, [bool]$LibraryMode) {
+    if ($LibraryMode -or $Edition -cne 'Desktop') { return }
+    $folders = Get-AZSGNativeHostFolders
+    if ([string]::IsNullOrWhiteSpace([string]$folders.Home)) { throw 'The Windows PowerShell home directory is unavailable.' }
+    $paths = [Collections.Generic.List[string]]::new()
+    $paths.Add([IO.Path]::Combine([string]$folders.Home, 'Modules'))
+    if (-not [string]::IsNullOrWhiteSpace([string]$folders.ProgramFiles)) {
+        $paths.Add([IO.Path]::Combine([string]$folders.ProgramFiles, 'WindowsPowerShell', 'Modules'))
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$folders.Documents)) {
+        $paths.Add([IO.Path]::Combine([string]$folders.Documents, 'WindowsPowerShell', 'Modules'))
+    }
+    $modulePath = [string]::Join([string][IO.Path]::PathSeparator, $paths.ToArray())
+    Set-AZSGNativeProcessModulePath $modulePath
+}
+
+# A PS5 helper can inherit a PS7-only PSModulePath from CTest or a launcher.
+# Repair only THIS process, before any auto-loaded module cmdlet is called.
+# Library imports and PowerShell Core hosts must leave their caller untouched.
+Initialize-AZSGNativeHostEnvironment -Edition $PSEdition -LibraryMode ([bool]$LibraryOnly)
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 

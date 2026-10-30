@@ -156,10 +156,16 @@ function Start-AZSSpeedGearGame {
         $previousSkip = [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process')
         try {
             if ($SkipUpdate) { [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', '1', 'Process') }
-            elseif ($previousSkip -ceq '1') { [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', $null, 'Process') }
+            elseif ($previousSkip -ceq '1') { [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', [NullString]::Value, 'Process') }
             $game = Start-Process -FilePath $executable -WorkingDirectory (Split-Path -Parent $executable) -PassThru -ErrorAction Stop
         } finally {
-            [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', $previousSkip, 'Process')
+            # .NET 9 preserves empty values; PowerShell's ordinary $null binds
+            # to an empty string here. Preserve absence separately from empty.
+            if ($null -eq $previousSkip) {
+                [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', [NullString]::Value, 'Process')
+            } else {
+                [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', $previousSkip, 'Process')
+            }
         }
         $result.Started = $true
         $result.GameProcessId = [int]$game.Id

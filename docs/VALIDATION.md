@@ -1,4 +1,4 @@
-# Validation — 2026-10-30
+# Validation — updated 2026-10-31
 
 ## Version 0.6.0 direct EXE updates
 

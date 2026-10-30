@@ -204,11 +204,27 @@ Assert-True ($nativeDecoded.Contains("& '" + $nativeUpdaterFile.Replace("'", "''
 $environmentBeforeCases = [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process')
 try {
     Reset-LauncherMocks
-    [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', [NullString]::Value, 'Process')
+    Assert-True ($null -eq [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process')) 'explicit null fixture really removes the variable'
     $result = Start-AZSSpeedGearGame -SelectedGamePath $gameExe -SkipUpdate -WarningAction SilentlyContinue
     Assert-True ($script:starts.Count -eq 1 -and $script:starts[0].SkipEnvironment -ceq '1') 'SkipUpdate is inherited by only the launched game'
     Assert-True ($null -eq [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process')) 'absent parent environment restored after SkipUpdate launch'
     Assert-True ($script:updateCalls.Count -eq 0 -and -not $result.ExitHelperStarted) 'SkipUpdate schedules neither network path nor lifecycle helper'
+
+    # .NET 9 can represent an existing empty value; older runtimes delete it.
+    # Exercise preservation only where the runtime can create that distinct case.
+    [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', [string]::Empty, 'Process')
+    if ($null -ne [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process')) {
+        Reset-LauncherMocks
+        $result = Start-AZSSpeedGearGame -SelectedGamePath $gameExe -SkipUpdate -WarningAction SilentlyContinue
+        $restoredEmpty = [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process')
+        Assert-True ($script:starts[0].SkipEnvironment -ceq '1' -and $null -ne $restoredEmpty -and $restoredEmpty -ceq '') 'SkipUpdate preserves an existing empty value rather than deleting it'
+        Reset-LauncherMocks
+        $result = Invoke-Case
+        $restoredEmpty = [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process')
+        Assert-True ($null -ne $script:starts[0].SkipEnvironment -and $script:starts[0].SkipEnvironment -ceq '' -and
+            $null -ne $restoredEmpty -and $restoredEmpty -ceq '') 'normal launch preserves distinct empty parent and child values'
+    }
 
     Reset-LauncherMocks
     [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'preserve-me', 'Process')
@@ -247,7 +263,11 @@ try {
         [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process') -ceq '1') 'failed normal CreateProcess restores the inherited skip flag'
     Assert-True ($script:starts.Count -eq 1) 'failed game creation never starts a lifecycle helper'
 } finally {
-    [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', $environmentBeforeCases, 'Process')
+    if ($null -eq $environmentBeforeCases) {
+        [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', [NullString]::Value, 'Process')
+    } else {
+        [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', $environmentBeforeCases, 'Process')
+    }
 }
 
 # Fixtures deliberately remain under artifacts for remote CI inspection. They
