@@ -6,6 +6,8 @@
 
 当前协议是通过自定义 CVar 和 `benilla-config/config.toml` 传输的 `SG1` 控制信息。后端默认 1×，控制信息失联 8 秒恢复 1×。若游戏更新改变 CVar 持久化、配置文件结构、保存时机或插件运行周期，必须重新验证控制通信。
 
+0.2.0 增加独立可拖动浮窗和 14 语言目录。原生组件读取 `%APPDATA%/wenilla-rogue/language.txt` 的白名单代码，原子生成本插件的 `NativeLocale.lua`，下一次进入世界时由 Lua 载入。经典 `GetLocale()` 不能完整表达所有自定义游戏语言，仅在缺少原生提示时作为回退；可用时也会参考已载入 HUD 的语言。若游戏改变语言文件位置/代码格式，需要重新适配。浮窗及面板位置与语言选择分别处理，语言刷新不会重置位置或倍率。
+
 原生文件名为 `dwmapi.dll`，与已安装 SurvivorsDragonUi 的 `avrt.dll` 分开。安装器拒绝覆盖无法通过 AZSSpeedGear 安装收据及 SHA-256 验证的同名 DLL；不尝试 DLL 链式加载，不修改 DragonUI 文件。
 
 ## 自动识别的含义

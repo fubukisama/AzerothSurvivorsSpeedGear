@@ -1,6 +1,8 @@
 -- WoW 1.12 / Lua 5.0: no modern Lua operators or modern frame callbacks.
 AZSSpeedGear = {};
 local Gear = AZSSpeedGear;
+local I18n = AZSSpeedGearI18n;
+local function tr(key) return I18n.Text(key); end
 local COMMAND_CVAR = "AZSSpeedGearCommand";
 local MIN_SPEED = 25;
 local MAX_SPEED = 1000;
@@ -223,23 +225,68 @@ local controller = Gear.NewController({
 Gear.controller = controller;
 
 local panel = nil;
+local launcher = nil;
 local statusLabel = nil;
 local measurementLabel = nil;
 local customBox = nil;
 local noticeLabel = nil;
 local lastRendered = nil;
 local dbReady = false;
+local captions = {};
+local noticeKey = "hint";
+local lastLocaleSecond = nil;
+
+local function bindText(widget, key)
+    table.insert(captions, { widget = widget, key = key });
+    widget:SetText(tr(key));
+    return widget;
+end
+
+local function sizeLauncher()
+    if (not launcher) then return; end
+    local text = tr("launcher");
+    local width = 0;
+    if (type(launcher.GetFontString) == "function") then
+        local ok, font = pcall(launcher.GetFontString, launcher);
+        if (ok and font and type(font.GetStringWidth) == "function") then
+            local measured, value = pcall(font.GetStringWidth, font);
+            if (measured and finiteNumber(value)) then width = value; end
+        end
+    end
+    if (width <= 0) then
+        local index = 1;
+        while (index <= string.len(text)) do
+            local byte = string.byte(text, index);
+            if (byte < 128) then width = width + 7;
+            elseif (byte >= 192) then width = width + 12; end
+            index = index + 1;
+        end
+    end
+    launcher:SetWidth(math.max(64, math.min(160, math.ceil(width + 20))));
+end
 
 local function chat(message)
     if (DEFAULT_CHAT_FRAME and type(DEFAULT_CHAT_FRAME.AddMessage) == "function") then
-        DEFAULT_CHAT_FRAME:AddMessage("|cff8ab4ff变速齿轮：|r" .. message);
+        DEFAULT_CHAT_FRAME:AddMessage("|cff8ab4ff" .. tr("chat_prefix") .. "|r" .. message);
     end
 end
 
 local function savedDatabase()
     if (type(AZSSpeedGearDB) ~= "table") then AZSSpeedGearDB = {}; end
-    if (AZSSpeedGearDB.show == nil) then AZSSpeedGearDB.show = true; end
+    if (AZSSpeedGearDB.show == nil) then AZSSpeedGearDB.show = false; end
     return AZSSpeedGearDB;
+end
+
+local function validPosition(point, relativePoint, x, y)
+    local points = { TOPLEFT = true, TOP = true, TOPRIGHT = true, LEFT = true, CENTER = true, RIGHT = true, BOTTOMLEFT = true, BOTTOM = true, BOTTOMRIGHT = true };
+    return type(point) == "string" and type(relativePoint) == "string" and points[point] and points[relativePoint]
+        and finiteNumber(x) and finiteNumber(y) and math.abs(x) < 10000 and math.abs(y) < 10000;
+end
+
+local function showLauncher()
+    if (launcher) then
+        if (worldActive) then launcher:Show(); else launcher:Hide(); end
+    end
 end
 
 local function setShown(shown)
@@ -252,30 +299,30 @@ local function render()
     if (not statusLabel) then return; end
     local status = "";
     if (not controller.bridgeReady) then
-        status = "当前游戏无法接收变速请求";
+        status = tr("channel_unavailable");
     elseif (not controller:RealTime()) then
-        status = "真实计时 API 不可用；无法发送请求";
+        status = tr("real_clock_unavailable");
     elseif (controller.phase == nil) then
-        status = "未找到游戏状态 API；已请求 1 倍";
+        status = tr("phase_unavailable");
     elseif (controller.solo == false) then
-        status = "联机保护：已请求 1 倍";
+        status = tr("coop_protection");
     elseif (controller.solo == nil) then
-        status = "无法确认单人模式；已请求 1 倍";
+        status = tr("solo_unknown");
     elseif (not controller.active) then
         if (controller.desiredSpeed100 ~= 100) then
-            status = "已请求暂停倍速；战斗时请求 x" .. speedText(controller.desiredSpeed100);
-        else status = "当前未战斗；已请求 1 倍"; end
+            status = string.format(tr("suspended"), speedText(controller.desiredSpeed100));
+        else status = tr("inactive"); end
     else
-        status = "目标 x" .. speedText(controller.speed100) .. " / 等待实测";
+        status = string.format(tr("target_wait"), speedText(controller.speed100));
         if (controller.measured) then
             if (math.abs(controller.measured - controller.speed100 / 100) > math.max(0.3, controller.speed100 / 300)) then
-                status = "未达到目标速度；请检查兼容日志";
-            else status = "目标 x" .. speedText(controller.speed100) .. " / 已获得实测"; end
+                status = tr("below_target");
+            else status = string.format(tr("target_measured"), speedText(controller.speed100)); end
         end
     end
-    local measurement = "实测：等待连续单人战斗 3 秒";
+    local measurement = tr("measurement_wait");
     if (controller.measured) then
-        measurement = "实测约 x" .. string.format("%.2f", controller.measured) .. "（游戏计时 / 真实时间）";
+        measurement = string.format(tr("measured"), controller.measured);
     end
     local signature = status .. measurement;
     if (signature ~= lastRendered) then
@@ -287,9 +334,11 @@ end
 
 local function requestSpeed(value)
     if (controller:RequestSpeed(value)) then
-        if (noticeLabel) then noticeLabel:SetText("正在切换，请以实测倍率为准"); end
+        noticeKey = "switching";
+        if (noticeLabel) then noticeLabel:SetText(tr(noticeKey)); end
     else
-        if (noticeLabel) then noticeLabel:SetText("仅单人战斗可调速；请输入 0.25–10"); end
+        noticeKey = "invalid_speed";
+        if (noticeLabel) then noticeLabel:SetText(tr(noticeKey)); end
     end
     render();
 end
@@ -297,8 +346,9 @@ end
 local function emergencyStop()
     local sent = controller:EmergencyStop();
     if (noticeLabel) then
-        if (sent) then noticeLabel:SetText("已发送 1 倍请求；等待实测确认");
-        else noticeLabel:SetText("无法写入 1 倍请求；请退出游戏恢复"); end
+        if (sent) then noticeKey = "stop_sent";
+        else noticeKey = "stop_failed"; end
+        noticeLabel:SetText(tr(noticeKey));
     end
     render();
 end
@@ -312,10 +362,10 @@ local function addText(parent, size, x, y, text)
         if (ok and type(face) == "string" and face ~= "") then pcall(label.SetFont, label, face, size, flags or ""); end
     end
     label:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y);
-    label:SetWidth(370);
-    label:SetHeight(18);
+    label:SetWidth(528);
+    label:SetHeight(34);
     label:SetJustifyH("LEFT");
-    label:SetText(text);
+    bindText(label, text);
     return label;
 end
 
@@ -324,21 +374,80 @@ local function addButton(parent, name, text, x, y, width, callback)
     button:SetWidth(width);
     button:SetHeight(26);
     button:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y);
-    button:SetText(text);
+    if (I18n.catalogs.en[text]) then bindText(button, text);
+    else button:SetText(text); end
     button:SetScript("OnClick", callback);
     return button;
+end
+
+local function buildLauncher()
+    if (launcher or type(CreateFrame) ~= "function" or not UIParent) then return; end
+    launcher = CreateFrame("Button", "AZSSpeedGearLauncher", UIParent, "UIPanelButtonTemplate");
+    launcher:SetWidth(64);
+    launcher:SetHeight(30);
+    launcher:SetPoint("RIGHT", UIParent, "RIGHT", -24, 80);
+    launcher:SetFrameStrata("DIALOG");
+    bindText(launcher, "launcher");
+    sizeLauncher();
+    launcher:SetMovable(true);
+    launcher:EnableMouse(true);
+    launcher:RegisterForDrag("LeftButton");
+    if (type(launcher.SetClampedToScreen) == "function") then pcall(launcher.SetClampedToScreen, launcher, true); end
+    launcher:SetScript("OnMouseDown", function()
+        -- A fresh press clears a drag whose release emitted no OnClick.
+        this.speedGearDragging = false;
+        this.speedGearSuppressClick = false;
+    end);
+    launcher:SetScript("OnDragStart", function()
+        this.speedGearDragging = true;
+        this.speedGearSuppressClick = true;
+        this:StartMoving();
+    end);
+    launcher:SetScript("OnDragStop", function()
+        this:StopMovingOrSizing();
+        this.speedGearDragging = false;
+        this.speedGearSuppressClick = true;
+        local point, relative, relativePoint, x, y = this:GetPoint(1);
+        if (validPosition(point, relativePoint, x, y)) then
+            local db = savedDatabase();
+            db.launcherPoint = point;
+            db.launcherRelativePoint = relativePoint;
+            db.launcherX = x;
+            db.launcherY = y;
+        end
+    end);
+    launcher:SetScript("OnClick", function()
+        if (this.speedGearDragging or this.speedGearSuppressClick) then
+            this.speedGearSuppressClick = false;
+            return;
+        end
+        setShown(not savedDatabase().show);
+    end);
+    launcher:SetScript("OnEnter", function()
+        if (GameTooltip and type(GameTooltip.SetOwner) == "function" and type(GameTooltip.SetText) == "function" and type(GameTooltip.Show) == "function") then
+            GameTooltip:SetOwner(this, "ANCHOR_LEFT");
+            GameTooltip:SetText(tr("launcher_hint"));
+            GameTooltip:Show();
+        end
+    end);
+    launcher:SetScript("OnLeave", function()
+        if (GameTooltip and type(GameTooltip.Hide) == "function") then GameTooltip:Hide(); end
+    end);
+    launcher:Hide();
+    Gear.launcher = launcher;
 end
 
 local function buildPanel()
     if (panel or type(CreateFrame) ~= "function" or not UIParent) then return; end
     panel = CreateFrame("Frame", "AZSSpeedGearPanel", UIParent);
-    panel:SetWidth(400);
-    panel:SetHeight(276);
+    panel:SetWidth(560);
+    panel:SetHeight(348);
     panel:SetPoint("CENTER", UIParent, "CENTER", 0, 0);
     panel:SetFrameStrata("DIALOG");
     panel:SetMovable(true);
     panel:EnableMouse(true);
     panel:RegisterForDrag("LeftButton");
+    if (type(panel.SetClampedToScreen) == "function") then pcall(panel.SetClampedToScreen, panel, true); end
     panel:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 16, insets = { left = 4, right = 4, top = 4, bottom = 4 } });
     panel:SetBackdropColor(0.04, 0.06, 0.10, 0.96);
     panel:SetScript("OnDragStart", function() this:StartMoving(); end);
@@ -351,53 +460,59 @@ local function buildPanel()
         db.x = x;
         db.y = y;
     end);
-    addText(panel, 14, 16, -16, "艾泽拉斯 · 变速齿轮");
-    addButton(panel, "AZSSpeedGearClose", "关闭", 332, -10, 52, function() setShown(false); end);
-    statusLabel = addText(panel, 12, 16, -48, "准备状态检测…");
-    measurementLabel = addText(panel, 11, 16, -72, "实测：等待连续单人战斗 3 秒");
+    local title = addText(panel, 14, 16, -16, "title");
+    title:SetWidth(410);
+    addButton(panel, "AZSSpeedGearClose", "close", 440, -10, 104, function() setShown(false); end);
+    statusLabel = addText(panel, 12, 16, -50, "inactive");
+    measurementLabel = addText(panel, 11, 16, -86, "measurement_wait");
     local presets = { 50, 100, 200, 300, 500 };
     local i = 1;
     while (i <= table.getn(presets)) do
         local selected = presets[i];
-        addButton(panel, "AZSSpeedGearPreset" .. i, "x" .. speedText(selected), 16 + (i - 1) * 74, -103, 66,
+        addButton(panel, "AZSSpeedGearPreset" .. i, "x" .. speedText(selected), 16 + (i - 1) * 104, -128, 96,
             function() requestSpeed(selected); end);
         i = i + 1;
     end
-    addText(panel, 11, 16, -148, "自定义倍速（0.25–10）：");
+    local customLabel = addText(panel, 11, 16, -180, "custom");
+    customLabel:SetWidth(270);
     customBox = CreateFrame("EditBox", "AZSSpeedGearCustom", panel, "InputBoxTemplate");
     customBox:SetWidth(70);
     customBox:SetHeight(26);
-    customBox:SetPoint("TOPLEFT", panel, "TOPLEFT", 196, -138);
+    customBox:SetPoint("TOPLEFT", panel, "TOPLEFT", 300, -172);
     customBox:SetAutoFocus(false);
     customBox:SetMaxLetters(6);
     customBox:SetText("1");
     local function submitCustom()
         local number = tonumber(customBox:GetText());
         if (finiteNumber(number)) then requestSpeed(number * 100);
-        else noticeLabel:SetText("请输入 0.25–10 之间的数字"); end
+        else noticeKey = "invalid_speed"; noticeLabel:SetText(tr(noticeKey)); end
         customBox:ClearFocus();
     end
     customBox:SetScript("OnEnterPressed", submitCustom);
     customBox:SetScript("OnEscapePressed", function() this:ClearFocus(); end);
-    addButton(panel, "AZSSpeedGearApply", "请求", 284, -138, 84, submitCustom);
-    addButton(panel, "AZSSpeedGearStop", "急停：恢复 1 倍", 16, -181, 352, emergencyStop);
-    noticeLabel = addText(panel, 11, 16, -221, "需要原生后端；隐藏面板不会停止控制");
-    addText(panel, 10, 16, -246, "/azsg 显示/隐藏 · /azsg stop 恢复 1 倍");
+    addButton(panel, "AZSSpeedGearApply", "apply", 390, -172, 140, submitCustom);
+    addButton(panel, "AZSSpeedGearStop", "stop", 16, -224, 528, emergencyStop);
+    noticeLabel = addText(panel, 11, 16, -270, "hint");
+    addText(panel, 10, 16, -312, "commands");
     Gear.panel = panel;
 end
 
 local function loadSettings()
+    I18n.Refresh();
     local db = savedDatabase();
     dbReady = true;
     buildPanel();
-    if (panel and finiteNumber(db.x) and finiteNumber(db.y) and type(db.point) == "string" and type(db.relativePoint) == "string") then
-        local points = { TOPLEFT = true, TOP = true, TOPRIGHT = true, LEFT = true, CENTER = true, RIGHT = true, BOTTOMLEFT = true, BOTTOM = true, BOTTOMRIGHT = true };
-        if (points[db.point] and points[db.relativePoint] and math.abs(db.x) < 10000 and math.abs(db.y) < 10000) then
-            panel:ClearAllPoints();
-            panel:SetPoint(db.point, UIParent, db.relativePoint, db.x, db.y);
-        end
+    buildLauncher();
+    if (panel and validPosition(db.point, db.relativePoint, db.x, db.y)) then
+        panel:ClearAllPoints();
+        panel:SetPoint(db.point, UIParent, db.relativePoint, db.x, db.y);
+    end
+    if (launcher and validPosition(db.launcherPoint, db.launcherRelativePoint, db.launcherX, db.launcherY)) then
+        launcher:ClearAllPoints();
+        launcher:SetPoint(db.launcherPoint, UIParent, db.launcherRelativePoint, db.launcherX, db.launcherY);
     end
     setShown(db.show);
+    showLauncher();
     controller:Update();
     render();
 end
@@ -412,8 +527,21 @@ local function slash(message)
     elseif (message == "stop" or message == "reset" or message == "1") then emergencyStop();
     elseif (message == "" or message == "toggle") then setShown(not savedDatabase().show);
     elseif (tonumber(message)) then requestSpeed(tonumber(message) * 100);
-    else chat("/azsg show | hide | stop | 0.25–10；暂停、选卡、离局及联机会请求恢复 1 倍。"); end
+    else chat(tr("help")); end
 end
+
+I18n.Listen(function()
+    local index = 1;
+    while (index <= table.getn(captions)) do
+        local entry = captions[index];
+        entry.widget:SetText(tr(entry.key));
+        index = index + 1;
+    end
+    sizeLauncher();
+    if (noticeLabel) then noticeLabel:SetText(tr(noticeKey)); end
+    lastRendered = nil;
+    render();
+end);
 
 SLASH_AZSSPEEDGEAR1 = "/azsg";
 SLASH_AZSSPEEDGEAR2 = "/speedgear";
@@ -429,18 +557,25 @@ if (type(CreateFrame) == "function") then
     driver:SetScript("OnEvent", function()
         if (event == "PLAYER_LOGOUT" or event == "PLAYER_LEAVING_WORLD") then
             worldActive = false;
+            showLauncher();
             controller:Shutdown();
         elseif (event == "ADDON_LOADED") then
             if (arg1 == "AZSSpeedGear") then loadSettings(); end
         elseif (event == "PLAYER_ENTERING_WORLD") then
             worldActive = true;
+            I18n.Refresh();
             if (not dbReady) then loadSettings(); end
+            showLauncher();
             controller:Update();
             render();
         end
     end);
     driver:SetScript("OnUpdate", function()
-        if (dbReady) then controller:Update(); render(); end
+        if (dbReady) then
+            local now = controller:RealTime();
+            if (now ~= lastLocaleSecond) then I18n.Refresh(); lastLocaleSecond = now; end
+            controller:Update(); render();
+        end
     end);
     Gear.driver = driver;
 end

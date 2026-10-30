@@ -1,6 +1,7 @@
 /build/
 /build-native-core-test/
 /build-lua50/
+/build-language-bridge-test/
 /dist/
 /artifacts/
 __pycache__/

@@ -57,6 +57,20 @@ function Get-ManagedPath([string]$RelativePath) {
     return Assert-InGame (Join-Path $script:gameRoot $relative)
 }
 
+function Assert-LocaleHint([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Runtime locale hint is missing: $Path"
+    }
+    if ((Get-Item -LiteralPath $Path).Length -gt 256) { throw "Runtime locale hint is too large: $Path" }
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -gt 256) { throw "Runtime locale hint is too large: $Path" }
+    $text = [Text.Encoding]::ASCII.GetString($bytes)
+    $pattern = '\A-- AZSSpeedGear runtime locale hint\r?\nAZSSpeedGearNativeLocale = (?:nil|"(?:en|pl|cs|de|pt|es|fr|ro|tr|ru|uk|zh|ja|ko)");(?:\r?\n)?\z'
+    if ($text -cnotmatch $pattern) {
+        throw "Runtime locale hint contains an invalid header, language or Lua statement: $Path"
+    }
+}
+
 function Assert-OwnedInstallation($Receipt) {
     if ($Receipt.Product -cne 'AZSSpeedGear' -or $Receipt.SchemaVersion -ne 1 -or
         (Get-FullPath ([string]$Receipt.GameExecutable)) -ine $script:gameExe) {
@@ -65,6 +79,9 @@ function Assert-OwnedInstallation($Receipt) {
     $expected = @{}
     foreach ($file in @($Receipt.ManagedFiles)) {
         $path = Get-ManagedPath ([string]$file.RelativePath)
+        if ($path -ieq (Join-Path $script:targetAddon 'NativeLocale.lua')) {
+            throw 'NativeLocale.lua must be declared as a LocaleHint runtime file, not a static hash entry.'
+        }
         if ($expected.ContainsKey($path) -or ([string]$file.SHA256) -notmatch '^[a-fA-F0-9]{64}$') {
             throw 'Invalid or duplicate file in installation receipt.'
         }
@@ -72,6 +89,18 @@ function Assert-OwnedInstallation($Receipt) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
             (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ine [string]$file.SHA256) {
             throw "Installed file is missing or changed; refusing to move it: $path"
+        }
+    }
+    if ($null -ne $Receipt.PSObject.Properties['RuntimeFiles']) {
+        foreach ($file in @($Receipt.RuntimeFiles)) {
+            if ([string]$file.RelativePath -cne 'benilla-config\AddOns\AZSSpeedGear\NativeLocale.lua' -or
+                [string]$file.Kind -cne 'LocaleHint') {
+                throw 'The receipt contains an unsupported runtime file or kind.'
+            }
+            $path = Get-ManagedPath ([string]$file.RelativePath)
+            if ($expected.ContainsKey($path)) { throw 'Duplicate managed/runtime file in installation receipt.' }
+            Assert-LocaleHint $path
+            $expected[$path] = 'Runtime:LocaleHint'
         }
     }
     if (-not $expected.ContainsKey($script:targetDll) -or
@@ -135,7 +164,7 @@ try {
         GameExecutable = $gameExe; RetainedInstallationReceipt = $backupReceipt
         AddonBackup = $backupAddon; NativeBackup = $backupDll
         RestoreInstructions = @(
-            'Close the game. Verify file SHA-256 values against the retained installation receipt.',
+            'Close the game. Verify managed file SHA-256 values and restricted runtime-file content against the retained installation receipt.',
             'Only when both destinations are absent, move AZSSpeedGear to benilla-config/AddOns/AZSSpeedGear and dwmapi.dll beside the game executable.',
             'Move AZSSpeedGear-install.json back into benilla-config. Never overwrite another mod or a newer installation.'
         )

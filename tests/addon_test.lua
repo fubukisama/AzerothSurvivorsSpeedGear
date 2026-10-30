@@ -1,6 +1,12 @@
 -- Run from the repository root using a stock Lua 5.0 interpreter.
+local function loadMain()
+    AZSSpeedGearNativeLocale = "zh";
+    dofile("AddOns/AZSSpeedGear/Localization.lua");
+    dofile("AddOns/AZSSpeedGear/LocaleDetection.lua");
+    dofile("AddOns/AZSSpeedGear/AZSSpeedGear.lua");
+end
 AZSSpeedGear_TEST = true;
-dofile("AddOns/AZSSpeedGear/AZSSpeedGear.lua");
+loadMain();
 local checks = 0;
 local function check(condition, message)
     checks = checks + 1;
@@ -188,7 +194,8 @@ local function frameStub(name)
     function frame:GetPoint() return self.point, self.relative, self.relativePoint, self.x, self.y; end
     function frame:ClearAllPoints() end
     function frame:SetFrameStrata() end
-    function frame:SetMovable() end
+    function frame:SetMovable(value) self.movable = value; end
+    function frame:SetClampedToScreen(value) self.clamped = value; end
     function frame:EnableMouse() end
     function frame:RegisterForDrag() end
     function frame:SetBackdrop() end
@@ -198,8 +205,8 @@ local function frameStub(name)
     function frame:GetText() return self.text; end
     function frame:SetScript(key, callback) self.scripts[key] = callback; end
     function frame:RegisterEvent() end
-    function frame:StartMoving() end
-    function frame:StopMovingOrSizing() end
+    function frame:StartMoving() self.moving = true; end
+    function frame:StopMovingOrSizing() self.moving = false; end
     function frame:SetAutoFocus() end
     function frame:SetMaxLetters() end
     function frame:ClearFocus() end
@@ -223,7 +230,7 @@ time = function() return wall; end;
 SlashCmdList = {};
 AZSSpeedGearDB = { show = false, point = "CENTER", relativePoint = "CENTER", x = 35, y = -40 };
 AZSSpeedGear_TEST = nil;
-dofile("AddOns/AZSSpeedGear/AZSSpeedGear.lua");
+loadMain();
 local driver = AZSSpeedGear.driver;
 local function fire(name, argument)
     event = name;
@@ -275,5 +282,116 @@ check(not AZSSpeedGear.controller.active and AZSSpeedGear.controller.desiredSpee
 fire("PLAYER_ENTERING_WORLD");
 check(AZSSpeedGear.controller.speed100 == 100, "new world defaults x1");
 check(AZSSpeedGearDB.speed100 == nil and AZSSpeedGearDB.desiredSpeed100 == nil, "speeds never enter SavedVariables");
+
+local function clickLauncher()
+    this = AZSSpeedGear.launcher;
+    this.scripts.OnMouseDown();
+    this.scripts.OnClick();
+end
+
+check(AZSSpeedGear.launcher.shown and AZSSpeedGear.launcher.movable, "independent launcher is visible and movable in world");
+check(AZSSpeedGear.launcher.clamped and AZSSpeedGear.panel.clamped, "launcher and panel use native screen clamping");
+SlashCmdList.AZSSPEEDGEAR("hide");
+check(AZSSpeedGear.launcher.shown and not AZSSpeedGear.panel.shown, "slash hide affects panel only");
+clickLauncher();
+check(AZSSpeedGear.panel.shown and AZSSpeedGearDB.show, "launcher click opens panel");
+clickLauncher();
+check(not AZSSpeedGear.panel.shown and not AZSSpeedGearDB.show, "launcher click closes panel");
+clickLauncher();
+frames.AZSSpeedGearClose.scripts.OnClick();
+check(AZSSpeedGear.launcher.shown and not AZSSpeedGear.panel.shown, "panel close button leaves launcher available");
+
+-- Dragging saves a separate anchor and must not also toggle the panel.
+this = AZSSpeedGear.launcher;
+this.scripts.OnMouseDown();
+this.scripts.OnDragStart();
+check(this.moving, "launcher begins native movement");
+this:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -92, -128);
+this.scripts.OnDragStop();
+check(not this.moving, "launcher stops native movement");
+check(AZSSpeedGearDB.launcherPoint == "TOPRIGHT" and AZSSpeedGearDB.launcherRelativePoint == "TOPRIGHT"
+    and AZSSpeedGearDB.launcherX == -92 and AZSSpeedGearDB.launcherY == -128, "launcher position saved independently");
+check(AZSSpeedGearDB.x == 35 and AZSSpeedGearDB.y == -40, "launcher drag does not overwrite panel anchor");
+this.scripts.OnClick();
+check(not AZSSpeedGear.panel.shown, "drag release click cannot toggle panel");
+clickLauncher();
+check(AZSSpeedGear.panel.shown, "normal click after drag works");
+-- Some clients do not dispatch OnClick after a drag: the next press still works.
+this = AZSSpeedGear.launcher;
+this.scripts.OnMouseDown();
+this.scripts.OnDragStart();
+this.scripts.OnDragStop();
+clickLauncher();
+check(not AZSSpeedGear.panel.shown, "next mouse press clears suppression when drag emitted no click");
+
+this = AZSSpeedGear.panel;
+this.scripts.OnDragStart();
+this:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", 120, 160);
+this.scripts.OnDragStop();
+check(AZSSpeedGearDB.point == "BOTTOMLEFT" and AZSSpeedGearDB.x == 120 and AZSSpeedGearDB.y == 160,
+    "panel retains its independent drag persistence");
+check(AZSSpeedGearDB.launcherX == -92 and AZSSpeedGearDB.launcherY == -128, "panel drag does not overwrite launcher anchor");
+
+local heartbeatWithHiddenLauncher = table.getn(writes);
+AZSSpeedGear.launcher:Hide();
+wall = wall + 3;
+runClock = runClock + 3;
+driver.scripts.OnUpdate();
+check(table.getn(writes) == heartbeatWithHiddenLauncher + 1 and AZSSpeedGear.controller.active,
+    "hiding launcher does not stop independent heartbeat driver");
+fire("PLAYER_LEAVING_WORLD");
+check(not AZSSpeedGear.launcher.shown, "world exit hides launcher");
+fire("PLAYER_ENTERING_WORLD");
+check(AZSSpeedGear.launcher.shown, "world entry restores launcher");
+
+-- Reload using the retained database: both positions and old panel preference survive.
+SlashCmdList.AZSSPEEDGEAR("show");
+loadMain();
+driver = AZSSpeedGear.driver;
+fire("ADDON_LOADED", "AZSSpeedGear");
+check(AZSSpeedGear.panel.shown and AZSSpeedGearDB.show, "existing shown preference survives reload");
+check(AZSSpeedGear.panel.point == "BOTTOMLEFT" and AZSSpeedGear.panel.x == 120 and AZSSpeedGear.panel.y == 160,
+    "panel anchor restored after reload");
+check(AZSSpeedGear.launcher.point == "TOPRIGHT" and AZSSpeedGear.launcher.x == -92 and AZSSpeedGear.launcher.y == -128,
+    "launcher anchor restored after reload");
+check(not AZSSpeedGear.launcher.shown, "launcher stays hidden until world entry after reload");
+fire("PLAYER_ENTERING_WORLD");
+check(AZSSpeedGear.launcher.shown, "reloaded launcher appears on world entry");
+
+AZSSpeedGearDB.launcherPoint = "INVALID";
+AZSSpeedGearDB.launcherX = 0 / 0;
+AZSSpeedGearDB.launcherY = 100000;
+loadMain();
+driver = AZSSpeedGear.driver;
+fire("ADDON_LOADED", "AZSSpeedGear");
+check(AZSSpeedGear.launcher.point == "RIGHT" and AZSSpeedGear.launcher.x == -24 and AZSSpeedGear.launcher.y == 80,
+    "invalid saved launcher coordinates fall back to visible default anchor");
+check(AZSSpeedGear.panel.x == 120 and AZSSpeedGear.panel.y == 160, "invalid launcher data does not affect panel position");
+
+AZSSpeedGearDB = nil;
+loadMain();
+driver = AZSSpeedGear.driver;
+fire("ADDON_LOADED", "AZSSpeedGear");
+fire("PLAYER_ENTERING_WORLD");
+check(AZSSpeedGearDB.show == false and not AZSSpeedGear.panel.shown and AZSSpeedGear.launcher.shown,
+    "fresh install starts with launcher only");
+
+local selectedSpeed = AZSSpeedGear.controller.speed100;
+local savedLauncherX = AZSSpeedGearDB.launcherX;
+AZSSpeedGearNativeLocale = "ja";
+wall = wall + 1;
+driver.scripts.OnUpdate();
+check(AZSSpeedGearI18n.code == "ja", "UI follows native Japanese selection");
+check(AZSSpeedGear.launcher.text == AZSSpeedGearI18n.catalogs.ja.launcher, "floating launcher caption switches language");
+check(frames.AZSSpeedGearClose.text == AZSSpeedGearI18n.catalogs.ja.close, "existing close button switches without rebuild");
+check(frames.AZSSpeedGearApply.text == AZSSpeedGearI18n.catalogs.ja.apply, "existing apply button switches language");
+check(AZSSpeedGear.controller.speed100 == selectedSpeed and AZSSpeedGearDB.launcherX == savedLauncherX,
+    "language refresh preserves speed state and position");
+AZSSpeedGearNativeLocale = "de";
+wall = wall + 1;
+driver.scripts.OnUpdate();
+check(AZSSpeedGear.launcher.text == AZSSpeedGearI18n.catalogs.de.launcher, "floating launcher follows German selection");
+check(AZSSpeedGear.launcher.width >= 64 and AZSSpeedGear.launcher.width <= 160, "localized launcher stays within readable width limits");
+check(AZSSpeedGearDB.language == nil, "language synchronization does not persist an override");
 
 print("AZSSpeedGear addon state and protocol: " .. checks .. " checks passed");

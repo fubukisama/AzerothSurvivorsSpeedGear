@@ -125,6 +125,20 @@ function Get-ManagedPath([string]$RelativePath) {
     return Assert-InGame (Join-Path $script:gameRoot $relative)
 }
 
+function Assert-LocaleHint([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Runtime locale hint is missing: $Path"
+    }
+    if ((Get-Item -LiteralPath $Path).Length -gt 256) { throw "Runtime locale hint is too large: $Path" }
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -gt 256) { throw "Runtime locale hint is too large: $Path" }
+    $text = [Text.Encoding]::ASCII.GetString($bytes)
+    $pattern = '\A-- AZSSpeedGear runtime locale hint\r?\nAZSSpeedGearNativeLocale = (?:nil|"(?:en|pl|cs|de|pt|es|fr|ro|tr|ru|uk|zh|ja|ko)");(?:\r?\n)?\z'
+    if ($text -cnotmatch $pattern) {
+        throw "Runtime locale hint contains an invalid header, language or Lua statement: $Path"
+    }
+}
+
 function Assert-OwnedInstallation($Receipt) {
     if ($Receipt.Product -cne 'AZSSpeedGear' -or $Receipt.SchemaVersion -ne 1 -or
         (Get-FullPath ([string]$Receipt.GameExecutable)) -ine $script:gameExe) {
@@ -133,6 +147,9 @@ function Assert-OwnedInstallation($Receipt) {
     $expected = @{}
     foreach ($file in @($Receipt.ManagedFiles)) {
         $path = Get-ManagedPath ([string]$file.RelativePath)
+        if ($path -ieq (Join-Path $script:targetAddon 'NativeLocale.lua')) {
+            throw 'NativeLocale.lua must be declared as a LocaleHint runtime file, not a static hash entry.'
+        }
         if ($expected.ContainsKey($path) -or ([string]$file.SHA256) -notmatch '^[a-fA-F0-9]{64}$') {
             throw 'Invalid or duplicate file in installation receipt.'
         }
@@ -140,6 +157,18 @@ function Assert-OwnedInstallation($Receipt) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
             (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ine [string]$file.SHA256) {
             throw "Installed file is missing or changed; refusing to replace it: $path"
+        }
+    }
+    if ($null -ne $Receipt.PSObject.Properties['RuntimeFiles']) {
+        foreach ($file in @($Receipt.RuntimeFiles)) {
+            if ([string]$file.RelativePath -cne 'benilla-config\AddOns\AZSSpeedGear\NativeLocale.lua' -or
+                [string]$file.Kind -cne 'LocaleHint') {
+                throw 'The receipt contains an unsupported runtime file or kind.'
+            }
+            $path = Get-ManagedPath ([string]$file.RelativePath)
+            if ($expected.ContainsKey($path)) { throw 'Duplicate managed/runtime file in installation receipt.' }
+            Assert-LocaleHint $path
+            $expected[$path] = 'Runtime:LocaleHint'
         }
     }
     if (-not $expected.ContainsKey($script:targetDll) -or
@@ -161,6 +190,7 @@ $script:gameRoot = Get-FullPath (Split-Path -Parent $gameExe)
 $packageRoot = Get-FullPath $PackagePath
 $sourceAddon = Join-Path $packageRoot 'AddOns\AZSSpeedGear'
 $sourceDll = Join-Path $packageRoot 'Native\dwmapi.dll'
+$sourceLocale = Join-Path $sourceAddon 'NativeLocale.lua'
 $configRoot = Assert-InGame (Join-Path $gameRoot 'benilla-config')
 $addonsRoot = Assert-InGame (Join-Path $configRoot 'AddOns')
 $script:targetAddon = Assert-InGame (Join-Path $addonsRoot 'AZSSpeedGear')
@@ -177,6 +207,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $sourceAddon 'AZSSpeedGear.toc') -Pa
     -not (Test-Path -LiteralPath $sourceDll -PathType Leaf)) {
     throw "Package is incomplete. Expected AddOns\AZSSpeedGear\AZSSpeedGear.toc and Native\dwmapi.dll under $packageRoot"
 }
+Assert-LocaleHint $sourceLocale
 if ($sourceAddon -ieq $targetAddon -or $sourceDll -ieq $targetDll) { throw 'Package and installed paths must be separate.' }
 Assert-GameStopped
 Assert-X64DwmImport $gameExe
@@ -192,6 +223,7 @@ if (Test-Path -LiteralPath $receiptPath) {
 $managedFiles = @()
 foreach ($file in @(Get-ChildItem -LiteralPath $sourceAddon -File -Force -Recurse | Sort-Object FullName)) {
     $insideAddon = $file.FullName.Substring($sourceAddon.Length).TrimStart([char[]]@('\', '/'))
+    if ($insideAddon -ieq 'NativeLocale.lua') { continue }
     $relative = 'benilla-config\AddOns\AZSSpeedGear\' + $insideAddon
     $destination = Get-ManagedPath $relative
     $managedFiles += [pscustomobject]@{
@@ -203,6 +235,9 @@ $managedFiles += [pscustomobject]@{
     RelativePath = 'dwmapi.dll'; SHA256 = (Get-FileHash -LiteralPath $sourceDll -Algorithm SHA256).Hash.ToLowerInvariant()
     Bytes = (Get-Item -LiteralPath $sourceDll).Length
 }
+$runtimeFiles = @([pscustomobject]@{
+    RelativePath = 'benilla-config\AddOns\AZSSpeedGear\NativeLocale.lua'; Kind = 'LocaleHint'
+})
 $versionLine = @(Get-Content -LiteralPath (Join-Path $sourceAddon 'AZSSpeedGear.toc') -Encoding UTF8 |
     Where-Object { $_ -match '^##\s*Version\s*:' } | Select-Object -First 1)
 $version = if ($versionLine.Count -gt 0) { ($versionLine[0] -replace '^##\s*Version\s*:\s*', '').Trim() } else { 'unknown' }
@@ -210,7 +245,7 @@ if ($CheckOnly) {
     [pscustomobject]@{
         Product = 'AZSSpeedGear'; Version = $version; GameExecutable = $gameExe
         X64AndDwmImportVerified = $true; ExistingInstallationVerified = ($null -ne $oldReceipt)
-        ManagedFileCount = $managedFiles.Count; CheckOnly = $true
+        ManagedFileCount = $managedFiles.Count; RuntimeFileCount = $runtimeFiles.Count; CheckOnly = $true
     } | ConvertTo-Json
     return
 }
@@ -251,11 +286,12 @@ try {
             throw "Copied file failed SHA-256 verification: $installedFile"
         }
     }
+    Assert-LocaleHint (Get-ManagedPath 'benilla-config\AddOns\AZSSpeedGear\NativeLocale.lua')
     $receipt = [ordered]@{
         SchemaVersion = 1; Product = 'AZSSpeedGear'; Version = $version
         InstallationId = [guid]::NewGuid().ToString(); InstalledUtc = [DateTime]::UtcNow.ToString('o')
         GameExecutable = $gameExe; GameExeSHA256 = (Get-FileHash -LiteralPath $gameExe -Algorithm SHA256).Hash.ToLowerInvariant()
-        ManagedFiles = @($managedFiles); BackupDirectory = $backupRoot
+        ManagedFiles = @($managedFiles); RuntimeFiles = @($runtimeFiles); BackupDirectory = $backupRoot
         PreviousInstallationBackedUp = ($null -ne $oldReceipt)
     }
     $temporaryReceipt = Assert-InGame ($receiptPath + '.' + [guid]::NewGuid().ToString('N') + '.tmp')
@@ -266,7 +302,7 @@ try {
     [pscustomobject]@{
         Installed = $true; Product = 'AZSSpeedGear'; Version = $version; GameExecutable = $gameExe
         AddonPath = $targetAddon; NativePath = $targetDll; ReceiptPath = $receiptPath
-        BackupDirectory = $backupRoot; ManagedFileCount = $managedFiles.Count
+        BackupDirectory = $backupRoot; ManagedFileCount = $managedFiles.Count; RuntimeFileCount = $runtimeFiles.Count
         Message = 'Start the game normally. Enable AZSSpeedGear in Options > AddOns. No game was launched by this script.'
     } | ConvertTo-Json
 } catch {

@@ -2,10 +2,21 @@
 
 [简体中文](README.zh-CN.md) · [Downloads](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/releases)
 
-An in-game speed control addon for **Azeroth Survivors on Windows x64**. Open
-`/azsg` to choose 0.5x, 1x, 2x, 3x or 5x, enter a custom rate from 0.25x to 10x,
+An in-game speed control addon for **Azeroth Survivors on Windows x64**. Click
+the persistent floating **Speed** button or use `/azsg` to choose 0.5x, 1x, 2x, 3x or 5x, enter a custom rate from 0.25x to 10x,
 or request a return to normal speed. The panel displays a measured game-time to
 wall-time ratio separately from the requested speed.
+
+Drag the floating button or the main panel freely; their positions are saved
+independently. Closing the panel keeps the floating button available. A new
+installation initially shows just the button; existing visibility preferences
+are retained.
+
+The UI follows the game's selected language on world entry, with complete
+catalogs for English, Simplified Chinese, Japanese, Korean, Polish, Czech,
+German, Portuguese, Spanish, French, Romanian, Turkish, Russian and Ukrainian.
+The native backend reads the game's small language setting and generates an
+addon-owned locale hint; the classic client locale is only a fallback.
 
 This is an unofficial community project, not affiliated with the game developer
 or Blizzard Entertainment. You must supply your own game installation. No game
@@ -30,7 +41,7 @@ The package installs `AddOns/AZSSpeedGear` under the game's `benilla-config`
 folder and a native `dwmapi.dll` beside the game executable. **Both parts are
 required.** No separate controller or launcher needs to stay open. The existing
 DragonUI `avrt.dll` is retained. An unrelated existing `dwmapi.dll` is never
-overwritten.
+overwritten. Keep the complete addon folder, including its localization files.
 
 Commands: `/azsg show`, `/azsg hide`, `/azsg 2`, `/azsg stop`. Hiding the panel
 does not stop its heartbeat. Each new run starts at 1x. Selection screens and
@@ -68,6 +79,8 @@ patch the EXE on disk. No network updater or telemetry is implemented.
 Exit the game and use the new release's installer to update. Installation receipts
 and SHA-256 checks establish which files belong to this addon; changed or unknown
 files cause a refusal. Previous owned versions are moved to backups.
+The generated `NativeLocale.lua` is verified against its exact allowed format
+and language whitelist; every other managed file retains static hash checks.
 
 ```powershell
 .\scripts\Uninstall.ps1 -GamePath 'D:\Games\AzerothSurvivors\AzerothSurvivors.exe' -CheckOnly

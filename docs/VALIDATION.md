@@ -1,5 +1,22 @@
 # Validation — 2026-10-30
 
+## Version 0.2.0 UI and locale changes
+
+The new floating launcher appears on world entry, toggles the panel, and retains
+an independent drag position. Lua fixtures cover drag-release click suppression,
+visibility, saved positions and unchanged heartbeat behavior. Fourteen complete
+UI catalogs preserve all format placeholders. Native locale hints take precedence
+over the classic locale API; live caption rebinding preserves control state.
+
+The language bridge only accepts fourteen known language codes, reads at most
+64 bytes, checks paths, and atomically writes the addon's own locale hint. Native
+fixtures cover missing/invalid input, all codes, repeated unchanged output,
+stale temporary files and linked paths. Installer fixtures cover old receipts,
+generated locale hints, exact-format validation and refusal of injected Lua.
+
+These are automated checks. Actual rendering and dragging of version 0.2.0 and
+native-speaker review of every translation have not yet been performed.
+
 ## Completed locally
 
 - Visual Studio 2026, MSVC x64 Release build, static C/C++ runtime.

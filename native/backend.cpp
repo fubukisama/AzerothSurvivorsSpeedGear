@@ -14,6 +14,7 @@
 #include "pe_image.h"
 #include "speed_clock.h"
 #include "command.h"
+#include "language_bridge.h"
 
 namespace {
 using QpcFn=BOOL(WINAPI*)(LARGE_INTEGER*);
@@ -34,12 +35,29 @@ std::uintptr_t imageBase=0;
 azsg::SimulationSite site{};
 std::filesystem::path root;
 std::mutex logMutex;
+bool productionGame = false;
 
 void log(const std::string& text) {
     std::lock_guard<std::mutex> guard(logMutex);
     std::ofstream out(root/L"AZSSpeedGear.log",std::ios::app);
     SYSTEMTIME now{};GetLocalTime(&now);
     out<<now.wHour<<":"<<now.wMinute<<":"<<now.wSecond<<" "<<text<<"\n";
+}
+DWORD WINAPI languageWorker(void*) {
+    std::filesystem::path languageFile;
+    if(productionGame) {
+        wchar_t appdata[32768]{};
+        auto length=GetEnvironmentVariableW(L"APPDATA",appdata,32768);
+        if(!length || length>=32768) return 0;
+        languageFile=std::filesystem::path(appdata)/L"wenilla-rogue"/L"language.txt";
+    } else {
+        languageFile=root/L"language-test.txt";
+    }
+    while(true) {
+        if(azsg::refresh_language_hint(root,languageFile)==azsg::LanguageHintResult::written)
+            log("locale-hint updated from native game language setting");
+        Sleep(1000);
+    }
 }
 void setSpeed(unsigned next,const char* why) {
     {
@@ -109,9 +127,13 @@ DWORD WINAPI worker(void*) {
     wchar_t executable[32768]{};GetModuleFileNameW(nullptr,executable,32768);
     auto exe=std::filesystem::path(executable);
     // The proxy forwards DWM normally in all other processes (including our test host).
-    if(_wcsicmp(exe.filename().c_str(),L"AzerothSurvivors.exe")!=0 && _wcsicmp(exe.filename().c_str(),L"AZSSpeedGearTestHost.exe")!=0) return 0;
+    productionGame=_wcsicmp(exe.filename().c_str(),L"AzerothSurvivors.exe")==0;
+    if(!productionGame && _wcsicmp(exe.filename().c_str(),L"AZSSpeedGearTestHost.exe")!=0) return 0;
     root=exe.parent_path();
-    log("AZSSpeedGear 0.1.0 start; default=1x; protocol=SG1");
+    log("AZSSpeedGear 0.2.0 start; default=1x; protocol=SG1");
+    // Locale synchronization remains available even if a future timing layout is refused.
+    auto localeThread=CreateThread(nullptr,0,languageWorker,nullptr,0,nullptr);
+    if(localeThread) CloseHandle(localeThread);
     imageBase=reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
     auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(imageBase);
     auto* pe=reinterpret_cast<const IMAGE_NT_HEADERS64*>(imageBase+dos->e_lfanew);

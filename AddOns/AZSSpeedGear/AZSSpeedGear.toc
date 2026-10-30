@@ -1,8 +1,11 @@
 ## Interface: 11200
 ## Title: AZS Speed Gear | 艾泽拉斯变速齿轮
 ## Notes: 单人游戏倍速请求面板；需要 AZS Speed Gear 原生后端。
-## Version: 0.1.0
+## Version: 0.2.0
 ## Author: AZS Speed Gear contributors
 ## SavedVariables: AZSSpeedGearDB
 
+NativeLocale.lua
+Localization.lua
+LocaleDetection.lua
 AZSSpeedGear.lua
