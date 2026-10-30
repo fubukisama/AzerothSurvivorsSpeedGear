@@ -370,7 +370,12 @@ function Write-AZSGUpdateState([string]$Root, $Result) {
     $destination = Join-Path $Root 'update-state.json'
     $temporary = Join-Path $Root ('state-' + [guid]::NewGuid().ToString('N') + '.tmp')
     $Result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temporary -Encoding UTF8
-    if ([IO.File]::Exists($destination)) { [IO.File]::Replace($temporary, $destination, $null) }
+    if ([IO.File]::Exists($destination)) {
+        # Some PowerShell hosts bind a null backup argument to an empty path.
+        $stateBackup = Join-Path $Root ('state-backup-' + [guid]::NewGuid().ToString('N') + '.tmp')
+        [IO.File]::Replace($temporary, $destination, $stateBackup)
+        Remove-Item -LiteralPath $stateBackup -Force
+    }
     else { [IO.File]::Move($temporary, $destination) }
 }
 
