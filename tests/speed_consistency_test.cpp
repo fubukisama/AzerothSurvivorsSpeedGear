@@ -66,7 +66,7 @@ Row observe(Counters& counters, double frequency, unsigned milliseconds) {
     row.hypothetical_cached_rate = double(counters.cached_frame_ticks.load() - start_cached) / frequency / row.seconds;
     return row;
 }
-bool near(double actual, double target, double tolerance) {
+bool withinTolerance(double actual, double target, double tolerance) {
     return actual >= target * (1.0 - tolerance) && actual <= target * (1.0 + tolerance);
 }
 } // namespace
@@ -165,9 +165,9 @@ int wmain() {
         const auto fixed_ratio = row.fixed_rate / baseline.fixed_rate;
         const auto elapsed_ratio = row.elapsed_rate / baseline.elapsed_rate;
         const auto cached_ratio = row.hypothetical_cached_rate / baseline.hypothetical_cached_rate;
-        const bool fixed_ok = near(fixed_ratio, target, 0.25);
-        const bool elapsed_ok = near(row.elapsed_rate, target, 0.25);
-        const bool qpc_ok = near(row.direct_qpc_rate, target, 0.10);
+        const bool fixed_ok = withinTolerance(fixed_ratio, target, 0.25);
+        const bool elapsed_ok = withinTolerance(row.elapsed_rate, target, 0.25);
+        const bool qpc_ok = withinTolerance(row.direct_qpc_rate, target, 0.10);
         if (!fixed_ok || !elapsed_ok || !qpc_ok) ++failures;
         std::cout << "target=" << target << " steps_per_second=" << row.steps_per_second
                   << " fixed_step_ratio=" << fixed_ratio << " independent_elapsed_ratio=" << elapsed_ratio
