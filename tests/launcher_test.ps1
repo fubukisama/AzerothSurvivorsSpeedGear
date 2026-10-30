@@ -12,6 +12,7 @@ $gameRoot = Join-Path $fixtureRoot "game with spaces & apostrophe's"
 $gameExe = Join-Path $gameRoot 'AzerothSurvivors.exe'
 $updaterDirectory = Join-Path $gameRoot 'benilla-config\AddOns\AZSSpeedGear\Updater'
 $updaterFile = Join-Path $updaterDirectory 'Update.ps1'
+$nativeUpdaterFile = Join-Path $updaterDirectory 'NativeUpdate.ps1'
 $oldUpdaterDirectory = Join-Path $fixtureRoot 'previous-updater'
 $utf8 = [Text.UTF8Encoding]::new($false)
 New-Item -ItemType Directory -Path $updaterDirectory -Force | Out-Null
@@ -34,8 +35,10 @@ function Reset-LauncherMocks {
     $script:cimFailure = $false
     $script:updateFailure = $false
     $script:helperFailure = $false
+    $script:gameFailure = $false
     $script:startDuringUpdate = $false
     $script:replaceUpdater = $false
+    $script:replaceWithNativeUpdater = $false
     $script:stopCalls = 0
 }
 
@@ -54,7 +57,10 @@ function Get-CimInstance {
 
 function Invoke-LauncherUpdate([string]$UpdaterPath, [string]$Executable) {
     $script:events += 'update'
-    $script:updateCalls += [pscustomobject]@{ UpdaterPath = $UpdaterPath; Executable = $Executable }
+    $script:updateCalls += [pscustomobject]@{
+        UpdaterPath = $UpdaterPath; Executable = $Executable
+        SkipEnvironment = [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process')
+    }
     if ($script:updateFailure) { throw 'mocked network failure' }
     if ($script:replaceUpdater) {
         $source = [IO.Path]::GetFullPath($script:updaterDirectory)
@@ -67,6 +73,9 @@ function Invoke-LauncherUpdate([string]$UpdaterPath, [string]$Executable) {
         Move-Item -LiteralPath $source -Destination $target
         New-Item -ItemType Directory -Path $script:updaterDirectory -Force | Out-Null
         [IO.File]::WriteAllText($script:updaterFile, 'new installed updater generation', $script:utf8)
+        if ($script:replaceWithNativeUpdater) {
+            [IO.File]::WriteAllText($script:nativeUpdaterFile, 'new installed native host generation', $script:utf8)
+        }
     }
     return [pscustomobject]@{ State = 'mock-check-returned'; CompatibilityVerified = $false }
 }
@@ -80,7 +89,10 @@ function Start-Process {
         FilePath = $FilePath; WorkingDirectory = $WorkingDirectory
         ArgumentList = @($ArgumentList); WindowStyle = $WindowStyle; PassThru = [bool]$PassThru
         UpdaterContents = $(if (Test-Path -LiteralPath $script:updaterFile -PathType Leaf) { [IO.File]::ReadAllText($script:updaterFile) } else { $null })
+        NativeUpdaterContents = $(if (Test-Path -LiteralPath $script:nativeUpdaterFile -PathType Leaf) { [IO.File]::ReadAllText($script:nativeUpdaterFile) } else { $null })
+        SkipEnvironment = [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process')
     }
+    if ($isGame -and $script:gameFailure) { throw 'mocked game start failure' }
     if (-not $isGame -and $script:helperFailure) { throw 'mocked helper start failure' }
     return [pscustomobject]@{ Id = $(if ($isGame) { 404 } else { 405 }) }
 }
@@ -166,6 +178,77 @@ $script:cimFailure = $true
 $refused = $false
 try { Invoke-Case | Out-Null } catch { $refused = $_.Exception.Message -match 'process query' }
 Assert-True ($refused -and $script:starts.Count -eq 0 -and $script:updateCalls.Count -eq 0) 'failed process inventory cannot silently launch a duplicate'
+
+Reset-LauncherMocks
+[IO.File]::WriteAllText($nativeUpdaterFile, 'inert native lifecycle host; never executed', $utf8)
+$result = Invoke-Case
+Assert-True ($result.Started -and $result.ExitHelperStarted -and $script:starts[1].WindowStyle -ceq 'Hidden') 'native lifecycle helper remains hidden'
+$nativeArguments = $script:starts[1].ArgumentList
+$nativeEncodedIndex = [Array]::IndexOf($nativeArguments, '-EncodedCommand')
+$nativeDecoded = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($nativeArguments[$nativeEncodedIndex + 1]))
+Assert-True ($nativeDecoded.Contains("& '" + $nativeUpdaterFile.Replace("'", "''") + "'")) 'new launcher invokes the same installed NativeUpdate host as the native trigger'
+Assert-True ($nativeDecoded.Contains("-GamePath '" + $gameExe.Replace("'", "''") + "'") -and -not $nativeDecoded.Contains('-WaitForExit')) 'native host owns staging and exit waiting without duplicate launcher wait mode'
+
+Reset-LauncherMocks
+$script:replaceUpdater = $true
+$script:replaceWithNativeUpdater = $true
+$script:oldUpdaterDirectory = Join-Path $fixtureRoot 'previous-native-updater'
+$result = Invoke-Case
+Assert-True ($result.Started -and $result.ExitHelperStarted -and
+    $script:starts[1].NativeUpdaterContents -ceq 'new installed native host generation') 'native lifecycle helper is relocated after synchronous directory replacement'
+$nativeArguments = $script:starts[1].ArgumentList
+$nativeEncodedIndex = [Array]::IndexOf($nativeArguments, '-EncodedCommand')
+$nativeDecoded = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($nativeArguments[$nativeEncodedIndex + 1]))
+Assert-True ($nativeDecoded.Contains("& '" + $nativeUpdaterFile.Replace("'", "''") + "'")) 'relocation never launches the backed-up old host path'
+
+$environmentBeforeCases = [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process')
+try {
+    Reset-LauncherMocks
+    [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', $null, 'Process')
+    $result = Start-AZSSpeedGearGame -SelectedGamePath $gameExe -SkipUpdate -WarningAction SilentlyContinue
+    Assert-True ($script:starts.Count -eq 1 -and $script:starts[0].SkipEnvironment -ceq '1') 'SkipUpdate is inherited by only the launched game'
+    Assert-True ($null -eq [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process')) 'absent parent environment restored after SkipUpdate launch'
+    Assert-True ($script:updateCalls.Count -eq 0 -and -not $result.ExitHelperStarted) 'SkipUpdate schedules neither network path nor lifecycle helper'
+
+    Reset-LauncherMocks
+    [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'preserve-me', 'Process')
+    $result = Start-AZSSpeedGearGame -SelectedGamePath $gameExe -SkipUpdate -WarningAction SilentlyContinue
+    Assert-True ($script:starts[0].SkipEnvironment -ceq '1' -and
+        [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process') -ceq 'preserve-me') 'SkipUpdate restores a preexisting custom parent value'
+
+    Reset-LauncherMocks
+    [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', '1', 'Process')
+    $result = Invoke-Case
+    Assert-True ($null -eq $script:starts[0].SkipEnvironment) 'normal launch clears an inherited skip flag for the game only'
+    Assert-True ($script:updateCalls[0].SkipEnvironment -ceq '1' -and $script:starts[1].SkipEnvironment -ceq '1') 'environment override excludes startup checks and background helper creation'
+    Assert-True ([Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process') -ceq '1') 'normal launch restores inherited parent skip flag'
+
+    Reset-LauncherMocks
+    [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'preserve-me', 'Process')
+    $result = Invoke-Case
+    Assert-True ($script:starts[0].SkipEnvironment -ceq 'preserve-me' -and
+        [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process') -ceq 'preserve-me') 'normal launch preserves non-skip custom values'
+
+    Reset-LauncherMocks
+    $script:gameFailure = $true
+    [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'preserve-failure', 'Process')
+    $refused = $false
+    try { Start-AZSSpeedGearGame -SelectedGamePath $gameExe -SkipUpdate -WarningAction SilentlyContinue | Out-Null }
+    catch { $refused = $_.Exception.Message -match 'game start failure' }
+    Assert-True ($refused -and $script:starts[0].SkipEnvironment -ceq '1' -and
+        [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process') -ceq 'preserve-failure') 'failed SkipUpdate CreateProcess restores original environment in finally'
+
+    Reset-LauncherMocks
+    $script:gameFailure = $true
+    [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', '1', 'Process')
+    $refused = $false
+    try { Invoke-Case | Out-Null } catch { $refused = $_.Exception.Message -match 'game start failure' }
+    Assert-True ($refused -and $null -eq $script:starts[0].SkipEnvironment -and
+        [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process') -ceq '1') 'failed normal CreateProcess restores the inherited skip flag'
+    Assert-True ($script:starts.Count -eq 1) 'failed game creation never starts a lifecycle helper'
+} finally {
+    [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', $environmentBeforeCases, 'Process')
+}
 
 # Fixtures deliberately remain under artifacts for remote CI inspection. They
 # contain only inert text files, and all external operations above were mocked.

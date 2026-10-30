@@ -110,8 +110,8 @@ multiplayer and Wine/Linux have not been validated in the real game. Read
 [compatibility details](docs/COMPATIBILITY.md) and [validation evidence](docs/VALIDATION.md).
 
 The native component hooks timing functions in the game process. It does not
-patch the EXE on disk. No gameplay telemetry is implemented. The optional update
-entry point contacts the fixed GitHub project for stable packages and compatibility
+patch the EXE on disk. No gameplay telemetry is implemented. The native update
+helper and optional entry point contact the fixed GitHub project for stable packages and compatibility
 records; it does not upload local game files or saved data.
 
 ## Update or uninstall
@@ -120,7 +120,22 @@ Exit the game and use the new release's installer to update. Installation receip
 and SHA-256 checks establish which files belong to this addon; changed or unknown
 files cause a refusal. Previous owned versions are moved to backups.
 
-Version 0.5.0 includes an independent update-aware entry point:
+**Since 0.6.0, running `AzerothSurvivors.exe` directly triggers automatic plugin
+checks.** An ordinary native worker launches a hidden system PowerShell helper
+outside DLL initialization and timing hooks. The helper's SHA-256 is embedded in
+the native component; missing or modified helpers are not executed.
+
+Checking and pre-downloading happen in the background. The current process keeps
+its loaded version; after all game instances exit normally, the helper rechecks
+and installs the update for a later launch. Rapid restarts can postpone installation.
+Offline failures preserve the existing version. A separate per-game task mutex
+deduplicates native and legacy-launcher helpers. No EXE entrypoint patch or change
+to DragonUI's avrt.dll is used. A read-only exclusive EXE lease and process checks
+protect the short installation swap window without changing executable bytes.
+The helper log is `benilla-config/AZSSpeedGear-updates/native-update.log`.
+
+Version 0.5.0's independent entry point remains available for pre-launch checks
+or manual recovery when native loading is unavailable:
 
 ```powershell
 .\scripts\Start.ps1 -GamePath 'E:\path\AzerothSurvivors.exe'
@@ -132,8 +147,9 @@ ZIP paths and the complete file manifest are verified. Installation runs the
 already-owned installer, preserves backups and waits for the game to stop.
 Network failures retain the existing installation; `-SkipUpdate` skips checking.
 This updates the plugin; the game's own updater remains responsible for the game.
-Launching the original EXE continues runtime structure detection but does not
-perform the launcher's plugin-download checks.
+Direct EXE launches now perform native-triggered background checks too. The
+launcher's `-SkipUpdate` applies only to its game child and restores the parent's
+environment after process creation.
 
 A separate scheduled Windows workflow reads the [official native manifest](https://wow.aethus.pl/exe/latest.json)
 every six hours. Changed game or scanner fingerprints trigger a temporary-runner

@@ -50,7 +50,7 @@ function Invoke-LauncherUpdate([string]$UpdaterPath, [string]$Executable) {
 function Get-LauncherPowerShell {
     $hostPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     if (-not (Test-Path -LiteralPath $hostPath -PathType Leaf)) {
-        throw 'The Windows PowerShell host needed for the exit-time update helper was not found.'
+        throw 'The Windows PowerShell host needed for the background update helper was not found.'
     }
     return $hostPath
 }
@@ -58,11 +58,21 @@ function Get-LauncherPowerShell {
 function Start-LauncherExitHelper([string]$Executable) {
     # Resolve again AFTER the synchronous update: that update may have moved the
     # old Updater directory and installed an entirely new copy in its place.
-    $updater = Get-LauncherUpdater $Executable
+    $updaterDirectory = Join-Path (Split-Path -Parent $Executable) 'benilla-config\AddOns\AZSSpeedGear\Updater'
+    $nativeHost = [IO.Path]::GetFullPath((Join-Path $updaterDirectory 'NativeUpdate.ps1'))
+    $waitArgument = ''
+    if (Test-Path -LiteralPath $nativeHost -PathType Leaf) {
+        # The native trigger and this fallback use the same host and its
+        # per-game lifecycle mutex. Only one stages now and installs after exit.
+        $updater = $nativeHost
+    } else {
+        $updater = Get-LauncherUpdater $Executable
+        $waitArgument = ' -WaitForExit'
+    }
     $hostPath = Get-LauncherPowerShell
     $updaterLiteral = $updater.Replace("'", "''")
     $gameLiteral = $Executable.Replace("'", "''")
-    $command = "& '$updaterLiteral' -GamePath '$gameLiteral' -WaitForExit"
+    $command = "& '$updaterLiteral' -GamePath '$gameLiteral'$waitArgument"
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     $helper = Start-Process -FilePath $hostPath -WorkingDirectory (Split-Path -Parent $Executable) `
         -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded) `
@@ -141,7 +151,16 @@ function Start-AZSSpeedGearGame {
             $result.ExistingProcessIds = @($running | ForEach-Object { [int]$_.ProcessId })
             return [pscustomobject]$result
         }
-        $game = Start-Process -FilePath $executable -WorkingDirectory (Split-Path -Parent $executable) -PassThru -ErrorAction Stop
+        # Change only this parent process's environment during CreateProcess.
+        # Neither the synchronous update nor the later helper sees this override.
+        $previousSkip = [Environment]::GetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', 'Process')
+        try {
+            if ($SkipUpdate) { [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', '1', 'Process') }
+            elseif ($previousSkip -ceq '1') { [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', $null, 'Process') }
+            $game = Start-Process -FilePath $executable -WorkingDirectory (Split-Path -Parent $executable) -PassThru -ErrorAction Stop
+        } finally {
+            [Environment]::SetEnvironmentVariable('AZSSPEEDGEAR_SKIP_UPDATE', $previousSkip, 'Process')
+        }
         $result.Started = $true
         $result.GameProcessId = [int]$game.Id
 
@@ -152,7 +171,7 @@ function Start-AZSSpeedGearGame {
                 $result.ExitHelperProcessId = $helper.ProcessId
             } catch {
                 $result.ExitHelperError = $_.Exception.Message
-                Write-Warning ('The game started, but the exit-time plugin update helper could not be scheduled. ' + $_.Exception.Message)
+                Write-Warning ('The game started, but the background plugin update helper could not be scheduled. ' + $_.Exception.Message)
             }
         }
         return [pscustomobject]$result

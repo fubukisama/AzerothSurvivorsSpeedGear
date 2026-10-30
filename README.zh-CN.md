@@ -72,7 +72,13 @@ Lua 面板通过 `SG1` 协议的 `AZSSpeedGearCommand` 自定义 CVar 请求倍�
 
 ## 更新与兼容
 
-0.5.0 提供独立的启动更新入口。安装发布包后，可运行：
+**0.6.0 起，直接运行 `AzerothSurvivors.exe` 即会自动检查插件更新。** 原生组件在普通后台线程中启动系统自带的隐藏 PowerShell 助手，不需要另开入口。助手脚本与原生组件内嵌的 SHA-256 对应，缺失或被改动时不执行。
+
+检查与预下载在后台进行，不等待网络结果再启动游戏。本次进程继续使用已加载版本；全部游戏实例正常退出后，助手重新校验并安装，完成后的后续启动使用新版。快速重开可能使安装继续等待。网络失败保留现有版本，后续启动继续尝试。任务按同一游戏目录去重，避免原生触发和旧启动入口重复下载。
+
+更新日志在 `benilla-config/AZSSpeedGear-updates/native-update.log`。本项目不修改游戏入口点，也不覆盖 DragonUI 的 `avrt.dll`。安装替换期间使用只读独占 EXE 文件租约与进程复查，缩小直接重启与文件替换交错的窗口；不修改游戏 EXE 内容。
+
+0.5.0 的独立启动入口仍可用于启动前检查或原生加载不可用时的手动更新：
 
 ```powershell
 .\scripts\Start.ps1 -GamePath 'E:\path\AzerothSurvivors.exe'
@@ -80,7 +86,7 @@ Lua 面板通过 `SG1` 协议的 `AZSSpeedGearCommand` 自定义 CVar 请求倍�
 
 入口在启动前检查本项目 GitHub 的最新正式 Release，校验包大小、GitHub 提供的 SHA-256 和完整文件清单，再调用已安装的事务安装器；游戏退出后再次检查，覆盖游戏在运行期间更新 EXE 的情况。游戏运行时不覆盖原生 DLL，不强制结束游戏，旧安装和配置保持备份。网络失败会保留现有安装并明确提示检查未完成。需要跳过联网检查时使用 `-SkipUpdate`。
 
-已有原生扫描仍在每次正常加载时重新定位地址；使用启动更新入口才能同时获得插件文件的自动升级。游戏自身的更新交给游戏，本项目更新入口负责本插件及其匹配信息。检查结果独立记录于 `benilla-config/AZSSpeedGear-updates/update-state.json`。
+已有原生扫描仍在每次正常加载时重新定位地址。游戏自身的更新交给游戏，本项目更新流程负责本插件及其匹配信息。检查结果独立记录于 `benilla-config/AZSSpeedGear-updates/update-state.json`。旧入口的 `-SkipUpdate` 会给本次游戏进程传递临时跳过标记，不改变全局环境设置。
 
 GitHub 的独立工作流每六小时读取[官方原生更新清单](https://wow.aethus.pl/exe/latest.json)，发现新 EXE 指纹或扫描器变更后，在临时远端 runner 校验并只读扫描官方 EXE，检查加载所需导入和负向扫描用例。它不运行游戏，也不将游戏文件放入本仓库或 Release。结果写入 [compatibility/windows.json](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/blob/main/compatibility/windows.json)。
 

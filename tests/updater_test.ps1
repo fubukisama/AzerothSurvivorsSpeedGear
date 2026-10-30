@@ -285,5 +285,17 @@ $badGame = New-Game 'changed-installed'
 Write-Text (Join-Path (Split-Path -Parent $badGame) 'dwmapi.dll') 'foreign-change'
 Reject { Invoke-AZSGUpdate -GamePath $badGame -CheckOnly } 'modified installed DLL rejected'
 
+$savedCore = ${function:Invoke-AZSGUpdateCore}
+$script:pendingCoreCalls = 0
+function Invoke-AZSGUpdateCore($Game, [switch]$CheckOnly) {
+    $script:pendingCoreCalls++
+    if ($script:pendingCoreCalls -eq 1) { return [pscustomobject]@{status='pending'} }
+    return [pscustomobject]@{status='up_to_date'}
+}
+try {
+    $resumed = Invoke-AZSGUpdate -GamePath $game -WaitForExit
+    Check ($resumed.status -eq 'up_to_date' -and $script:pendingCoreCalls -eq 2) 'exit helper waits again when a direct relaunch leaves a pending package'
+} finally { Set-Item -LiteralPath Function:\Invoke-AZSGUpdateCore -Value $savedCore }
+
 Write-Host "updater checks=$script:checks failures=$script:failures fixture=$root"
 if ($script:failures) { throw 'Updater regression checks failed.' }

@@ -1,5 +1,23 @@
 # Validation — 2026-10-30
 
+## Version 0.6.0 direct EXE updates
+
+All new tests run only on remote Windows CI. The native launch-policy tests use
+injected process APIs and never start real updater children. A separate tiny
+compiled EXE statically imports the actual DWM proxy, then proves a hidden
+helper performs its immediate and post-exit calls using a receipt-owned mock
+updater. No actual game executable, network updater or game assets are used.
+The fixture compares the EXE's original entrypoint bytes before/after loading.
+An additional fixture verifies that an exclusive read lease blocks a new process
+open until released. This is OS/fixture evidence, not a universal guarantee
+against every possible external updater or filesystem race.
+
+PowerShell mocks cover helper deduplication, initial failure with a later exit
+attempt, receipt/hash refusal, refreshed helper paths and skip-environment
+restoration. Existing installer fixtures cover the leased image snapshot and
+rollback. No local build, probe, helper execution, game launch or UI test is
+performed; local deployment only installs the remotely published package.
+
 ## Version 0.5.0 update-following validation
 
 Updater, launcher and official-manifest monitor tests run only in remote CI.

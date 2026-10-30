@@ -448,7 +448,9 @@ function Invoke-AZSGUpdateCore($Game, [switch]$CheckOnly) {
         if ([string]$freshInstallation.Receipt.Version -cne $result.installedVersion) { throw 'Installed plugin changed during this update.' }
         $trustedInstaller = Join-Path $game.Root 'benilla-config\AddOns\AZSSpeedGear\Updater\Install.ps1'
         if (-not $freshInstallation.Owned.ContainsKey($trustedInstaller)) { throw 'No receipt-owned installed updater installer is available.' }
-        if (@(Get-AZSGGameProcesses $game.Executable).Count -gt 0) { throw 'The game restarted; retry after it exits.' }
+        if (@(Get-AZSGGameProcesses $game.Executable).Count -gt 0) {
+            $result.status = 'pending'; Write-AZSGUpdateState $updateRoot $result; return $result
+        }
         # Only the CURRENT receipt-owned installer is executed. A script inside
         # the downloaded archive is never used to perform this installation.
         $null = & $trustedInstaller -GamePath $game.Executable -PackagePath $package
@@ -469,21 +471,26 @@ function Invoke-AZSGUpdate([string]$GamePath, [switch]$CheckOnly, [switch]$WaitF
     # The exit callback waits BEFORE acquiring the launcher/install mutex and
     # before looking at receipts, hashes or the network. This avoids deadlocking
     # a launcher and ensures a game's own update is observed after it finishes.
-    if ($WaitForExit) { Wait-AZSGGameExit $game.Executable }
-    $mutex = [Threading.Mutex]::new($false, (Get-AZSGUpdateMutexName $game.Executable))
-    $held = $false
-    try {
-        try { $held = $mutex.WaitOne() }
-        catch [Threading.AbandonedMutexException] { $held = $true }
-        if (-not $held) { throw 'Could not acquire the shared launcher/update mutex.' }
-        # Windows mutexes are reentrant for the same thread: a synchronous
-        # Start.ps1 -> & Update.ps1 releases only this invocation's acquisition.
-        $game = Get-AZSGGame $GamePath
-        return Invoke-AZSGUpdateCore -Game $game -CheckOnly:$CheckOnly
-    } finally {
-        if ($held) { $mutex.ReleaseMutex() }
-        $mutex.Dispose()
-    }
+    do {
+        if ($WaitForExit) { Wait-AZSGGameExit $game.Executable }
+        $mutex = [Threading.Mutex]::new($false, (Get-AZSGUpdateMutexName $game.Executable))
+        $held = $false
+        try {
+            try { $held = $mutex.WaitOne() }
+            catch [Threading.AbandonedMutexException] { $held = $true }
+            if (-not $held) { throw 'Could not acquire the shared launcher/update mutex.' }
+            # Windows mutexes are reentrant for the same thread: a synchronous
+            # Start.ps1 -> & Update.ps1 releases only this invocation's acquisition.
+            $game = Get-AZSGGame $GamePath
+            $result = Invoke-AZSGUpdateCore -Game $game -CheckOnly:$CheckOnly
+        } finally {
+            if ($held) { $mutex.ReleaseMutex() }
+            $mutex.Dispose()
+        }
+        # A direct EXE launch can race the first process snapshot. Keep pending
+        # updates alive, releasing the install lock before waiting again.
+    } while ($WaitForExit -and $result.status -eq 'pending')
+    return $result
 }
 
 if (-not $LibraryOnly) {

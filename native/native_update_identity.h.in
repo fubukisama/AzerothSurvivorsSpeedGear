@@ -1,0 +1,3 @@
+#pragma once
+// Frozen at configure time from scripts/NativeUpdate.ps1; no network-supplied code identity.
+#define AZSG_NATIVE_UPDATE_SCRIPT_SHA256 "@AZSG_NATIVE_UPDATE_SCRIPT_SHA256@"

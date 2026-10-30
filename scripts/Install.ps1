@@ -46,8 +46,9 @@ function Assert-GameStopped {
     }
 }
 
-function Assert-X64DwmImport([string]$Path) {
-    $bytes = [IO.File]::ReadAllBytes($Path)
+function Assert-X64DwmImport([string]$Path, [byte[]]$ImageBytes) {
+    if ($PSBoundParameters.ContainsKey('ImageBytes')) { $bytes = $ImageBytes }
+    else { $bytes = [IO.File]::ReadAllBytes($Path) }
     function Read-U16([int]$Offset) {
         if ($Offset -lt 0 -or $Offset -gt $bytes.Length - 2) { throw 'Invalid PE bounds.' }
         return [BitConverter]::ToUInt16($bytes, $Offset)
@@ -210,7 +211,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $sourceAddon 'AZSSpeedGear.toc') -Pa
 Assert-LocaleHint $sourceLocale
 if ($sourceAddon -ieq $targetAddon -or $sourceDll -ieq $targetDll) { throw 'Package and installed paths must be separate.' }
 Assert-GameStopped
-Assert-X64DwmImport $gameExe
+if ($CheckOnly) { Assert-X64DwmImport $gameExe }
 
 $oldReceipt = $null
 if (Test-Path -LiteralPath $receiptPath) {
@@ -259,8 +260,26 @@ $previousDll = Assert-InGame (Join-Path $previousRoot 'dwmapi.dll')
 $previousReceipt = Assert-InGame (Join-Path $previousRoot 'AZSSpeedGear-install.json')
 $movedAddon = $false; $movedDll = $false; $movedReceipt = $false
 $startedAddonCopy = $false; $startedDllCopy = $false; $wroteReceipt = $false
+$gameLease = $null
 try {
+    # Direct EXE launches do not participate in the optional launcher's mutex.
+    # Hold a read-only exclusive lease during the short swap/rollback window so
+    # a new process cannot open the EXE while its plugin files are being changed.
+    $gameLease = [IO.File]::Open($gameExe, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
     Assert-GameStopped
+    if ($gameLease.Length -gt 1GB) { throw 'The selected game executable is too large.' }
+    $gameImageBytes = [byte[]]::new([int]$gameLease.Length)
+    $gameImageOffset = 0
+    while ($gameImageOffset -lt $gameImageBytes.Length) {
+        $count = $gameLease.Read($gameImageBytes, $gameImageOffset, $gameImageBytes.Length - $gameImageOffset)
+        if ($count -eq 0) { throw 'The selected executable changed while acquiring the install lease.' }
+        $gameImageOffset += $count
+    }
+    Assert-X64DwmImport -Path $gameExe -ImageBytes $gameImageBytes
+    $gameDigest = [Security.Cryptography.SHA256]::Create()
+    try { $leasedGameHash = [BitConverter]::ToString($gameDigest.ComputeHash($gameImageBytes)).Replace('-', '').ToLowerInvariant() }
+    finally { $gameDigest.Dispose() }
+    $gameImageBytes = $null
     if ($null -ne $oldReceipt) { Assert-OwnedInstallation $oldReceipt }
     New-Item -ItemType Directory -Path $addonsRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $previousRoot -Force | Out-Null
@@ -290,7 +309,7 @@ try {
     $receipt = [ordered]@{
         SchemaVersion = 1; Product = 'AZSSpeedGear'; Version = $version
         InstallationId = [guid]::NewGuid().ToString(); InstalledUtc = [DateTime]::UtcNow.ToString('o')
-        GameExecutable = $gameExe; GameExeSHA256 = (Get-FileHash -LiteralPath $gameExe -Algorithm SHA256).Hash.ToLowerInvariant()
+        GameExecutable = $gameExe; GameExeSHA256 = $leasedGameHash
         ManagedFiles = @($managedFiles); RuntimeFiles = @($runtimeFiles); BackupDirectory = $backupRoot
         PreviousInstallationBackedUp = ($null -ne $oldReceipt)
     }
@@ -325,4 +344,6 @@ try {
         Write-Warning "Automatic rollback was incomplete. All retained files are under $backupRoot. Recovery error: $($_.Exception.Message)"
     }
     throw $installError
+} finally {
+    if ($null -ne $gameLease) { $gameLease.Dispose() }
 }
