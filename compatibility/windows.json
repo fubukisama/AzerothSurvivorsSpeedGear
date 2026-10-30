@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "product": "AzerothSurvivorsSpeedGear",
+  "scannerContract": "rust-duration25ms-waitable-timer-v1",
+  "gameVersion": "0.130.0",
+  "gameSha256": "8829953418a4d996cc5287f0e9fad25407ca30ceb64d105a4f57833caef78016",
+  "gameBytes": 147168256,
+  "status": "structural_only",
+  "reason": "Loader, unique simulation-wait scan and in-memory negative checks passed; gameplay is not verified.",
+  "checkedUtc": "2026-10-30T13:44:25Z",
+  "ciRunId": "41065594088",
+  "sourceCommit": "8f305eaeac729344354df34a3f6e786b033b51dd",
+  "engineFingerprint": "ceaf34be231c6ab72b45b9361bd33b0682a786c447557dc4175ffc8a7af19743"
+}
