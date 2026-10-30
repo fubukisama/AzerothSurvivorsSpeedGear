@@ -35,6 +35,12 @@ jobs:
         run: cmake --build build --config Release --parallel 4
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: RemoteCTestEvidence
+          path: build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
       - name: Save debounce regression model
         run: python tests/debounce_test.py
       - name: Compatibility monitor parser tests

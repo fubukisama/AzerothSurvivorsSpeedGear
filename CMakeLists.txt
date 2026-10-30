@@ -119,6 +119,25 @@ if(BUILD_TESTING)
      & (Join-Path $directory 'AZSSpeedGearTestHost.exe') 350 3
      exit $LASTEXITCODE")
   set_tests_properties(NativeTransitions PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+  add_executable(speed_consistency_test tests/speed_consistency_test.cpp "${CMAKE_CURRENT_BINARY_DIR}/simulation_fixture.asm")
+  set_target_properties(speed_consistency_test PROPERTIES
+    OUTPUT_NAME AZSSpeedGearTestHost
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/speed-consistency-bin")
+  target_compile_definitions(speed_consistency_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+  target_compile_options(speed_consistency_test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/utf-8> $<$<COMPILE_LANGUAGE:CXX>:/W4>)
+  add_dependencies(speed_consistency_test AZSSpeedGear)
+  # Real production DLL, synthetic 25ms host, fresh directory for every run.
+  # Both this wrapper and the EXE refuse to perform the diagnostic outside CI.
+  add_test(NAME SpeedConsistencyModels COMMAND "${AZSG_POWERSHELL}" -NoProfile -Command
+    "$ErrorActionPreference='Stop'
+     if ($env:GITHUB_ACTIONS -cne 'true' -or [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) { throw 'SpeedConsistencyModels runs only in remote GitHub Actions.' }
+     $directory=Join-Path '${CMAKE_CURRENT_BINARY_DIR}/speed-consistency-runs' ([guid]::NewGuid().ToString('N'))
+     New-Item -ItemType Directory -Path $directory -Force | Out-Null
+     Copy-Item -LiteralPath '$<TARGET_FILE:speed_consistency_test>' -Destination (Join-Path $directory 'AZSSpeedGearTestHost.exe')
+     Copy-Item -LiteralPath '$<TARGET_FILE:AZSSpeedGear>' -Destination (Join-Path $directory 'dwmapi.dll')
+     & (Join-Path $directory 'AZSSpeedGearTestHost.exe')
+     exit $LASTEXITCODE")
+  set_tests_properties(SpeedConsistencyModels PROPERTIES TIMEOUT 35 RUN_SERIAL TRUE LABELS "remote;diagnostic;synthetic")
   set(LUA50_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.sources/lua-5.0.3" CACHE PATH "Lua 5.0.3 sources for addon compatibility tests")
   if(EXISTS "${LUA50_ROOT}/src/lapi.c")
     file(GLOB lua_sources "${LUA50_ROOT}/src/*.c" "${LUA50_ROOT}/src/lib/*.c")
@@ -133,5 +152,7 @@ if(BUILD_TESTING)
     set_tests_properties(Lua50Addon PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME Lua50Localization COMMAND lua50 tests/localization_test.lua)
     set_tests_properties(Lua50Localization PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME Lua50MeasurementRegression COMMAND lua50 tests/measurement_regression.lua)
+    set_tests_properties(Lua50MeasurementRegression PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" LABELS "remote;measurement-regression")
   endif()
 endif()
