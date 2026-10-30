@@ -4,6 +4,7 @@
 /build-language-bridge-test/
 /dist/
 /artifacts/
+/acceptance/
 __pycache__/
 *.user
 third_party/minhook/.git/

@@ -44,6 +44,11 @@ function Gear.NewController(api)
     self.measured = nil;
     self.confirmedSpeed100 = nil;
     self.measurePendingAt = nil;
+    self.measureUncertainty = nil;
+    self.measureRawAge = nil;
+    self.measureFrameWall = nil;
+    self.measureFrameClock = nil;
+    self.confirmedAt = nil;
     self.measureStart = nil;
     self.measureRun = nil;
     self.previousRun = nil;
@@ -76,6 +81,11 @@ function Gear.NewController(api)
         self.measured = nil;
         self.confirmedSpeed100 = nil;
         self.measurePendingAt = nil;
+        self.measureUncertainty = nil;
+        self.measureRawAge = nil;
+        self.measureFrameWall = nil;
+        self.measureFrameClock = nil;
+        self.confirmedAt = nil;
         self.measureStart = nil;
         self.measureRun = nil;
         self.previousRun = nil;
@@ -117,47 +127,80 @@ function Gear.NewController(api)
         return ok and result ~= false;
     end
 
-    function self:Measure(now, run, sampled)
-        if (not sampled) then run = safeCall(self.api.runTime); end
-        if (not now or not finiteNumber(run) or run < 0) then self:ResetMeasurement(); return; end
-        if (self.previousRun and run < self.previousRun) then
-            if (self.previousRun - run > 1) then
-                self:ResetMeasurement();
-            else
-                -- Server clock corrections must not restart the real-time window.
-                -- Retain its high-water mark without inventing any clock advance.
-                run = self.previousRun;
-            end
+    function self:Measure(now)
+        local sample = safeCall(self.api.rawRunSample);
+        if (not now or type(sample) ~= "table" or not finiteNumber(sample.t) or sample.t < 0
+            or not finiteNumber(sample.updated) or sample.updated < 0) then self:ResetMeasurement(); return; end
+        local run, updated = sample.t, sample.updated;
+        local clock = safeCall(self.api.clientClock);
+        local hasClock = finiteNumber(clock) and clock >= updated;
+        if (self.rawRunValue ~= run or self.rawRunUpdated ~= updated) then
+            if (self.rawRunValue and run < self.rawRunValue) then self:ResetMeasurement(); end
+            self.rawRunValue = run;
+            self.rawRunUpdated = updated;
+            self.rawSeenAt = now;
         end
-        self.previousRun = run;
-        if (not self.measurePendingAt or now < self.measurePendingAt or (self.measureStart and now < self.measureStart)) then
-            self:ResetMeasurement();
-            self.measurePendingAt = now;
-            self.previousRun = run;
-            return;
+        -- A smooth getter may keep advancing on the hooked client clock after
+        -- server publications stop. Such interpolation is never measurement input.
+        if (not self.rawSeenAt or now < self.rawSeenAt) then self.rawSeenAt = now; self:ResetMeasurement(); end
+        if (now - self.rawSeenAt >= 2) then self:ResetMeasurement(); return; end
+
+        local uncertainty = 1;
+        local boundary = self.measureFrameWall and now ~= self.measureFrameWall;
+        if (boundary and now == self.measureFrameWall + 1 and hasClock
+            and finiteNumber(self.measureFrameClock) and clock > self.measureFrameClock) then
+            -- Optional GetTime only bounds observation phase; it is NOT wall
+            -- time and is never divided by the requested speed. This assumes the
+            -- supported unclamped frame clock advances at least 0.25x wall time.
+            -- A 0.02 virtual-second margin covers pace/quantization uncertainty.
+            uncertainty = math.min(1, (clock - self.measureFrameClock + 0.02) / 0.25);
         end
+        if (self.measureFrameWall and now < self.measureFrameWall) then self:ResetMeasurement(); boundary = false; end
+        self.measureFrameWall = now;
+        self.measureFrameClock = hasClock and clock or nil;
+        if (not self.measurePendingAt) then self.measurePendingAt = now; return; end
+        if (now <= self.measurePendingAt or not boundary) then return; end
+
+        -- The raw clock belongs to its last received publication, not this
+        -- OnUpdate. Bound that cached age under the same minimum-clock-rate
+        -- assumption; unknown transport/publication latency remains outside this
+        -- estimate, so this is not certification of physical simulation speed.
+        local rawAge = 0;
+        if (hasClock) then rawAge = (clock - updated + 0.02) / 0.25; end
         if (not self.measureStart) then
-            -- The request can arrive anywhere inside time()'s integer second.
-            -- Start only on a later observed boundary, never backdate its value.
-            if (now <= self.measurePendingAt) then return; end
-            self.measureStart = now;
-            self.measureRun = run;
+            self.measureStart = now; self.measureRun = run;
+            self.measureUncertainty = uncertainty; self.measureRawAge = rawAge;
             return;
         end
         local elapsed = now - self.measureStart;
-        if (elapsed >= 1) then
-            local delta = run - self.measureRun;
-            self.measured = nil;
-            if (delta > 0) then self.measured = delta / elapsed; end
-            local target = self.speed100 / 100;
-            local tolerance = 0.10;
-            if (self.confirmedSpeed100 == self.speed100) then tolerance = 0.20; end
-            if (finiteNumber(self.measured) and self.measured > 0
-                and math.abs(self.measured - target) <= target * tolerance) then
-                self.confirmedSpeed100 = self.speed100;
-            else self.confirmedSpeed100 = nil; end
-            self.measureStart = now;
-            self.measureRun = run;
+        if (elapsed < 1) then return; end
+        local delta = run - self.measureRun;
+        self.measured = nil;
+        if (delta > 0) then self.measured = delta / elapsed; end
+        local lowerElapsed = elapsed - self.measureUncertainty - rawAge;
+        local upperElapsed = elapsed + uncertainty + self.measureRawAge;
+        local low, high = nil, nil;
+        if (delta > 0 and lowerElapsed > 0 and upperElapsed > 0) then
+            low = delta / upperElapsed; high = delta / lowerElapsed;
+        end
+        local target = self.speed100 / 100;
+        local retained = self.confirmedSpeed100 == self.speed100;
+        local tolerance = 0.10;
+        local contained = hasClock and low and low >= target * (1 - tolerance) and high <= target * (1 + tolerance);
+        if (contained) then
+            self.confirmedSpeed100 = self.speed100;
+            self.confirmedAt = now;
+        elseif (retained) then
+            local outside = not self.measured or (low and (high < target * 0.90 or low > target * 1.10));
+            if (outside or not self.confirmedAt or now - self.confirmedAt >= 4) then
+                self.confirmedSpeed100 = nil; self.confirmedAt = nil;
+            end
+        end
+        -- Keep accumulating when the interval is too wide. Resetting each short
+        -- window would otherwise make conservative confirmation impossible.
+        if (contained or elapsed >= 12) then
+            self.measureStart = now; self.measureRun = run;
+            self.measureUncertainty = uncertainty; self.measureRawAge = rawAge;
         end
     end
 
@@ -188,8 +231,9 @@ function Gear.NewController(api)
         elseif (self.bridgeReady and now and (not self.lastPulse or now < self.lastPulse or now - self.lastPulse >= 1)) then
             self:Pulse(now);
         end
-        -- Reuse this update's native sample: two reads can straddle a correction.
-        if (self.active) then self:Measure(now, run, true); else self:ResetMeasurement(); end
+        -- The smooth getter above detects run boundaries only. Measure reads a
+        -- separate raw publication and never measures client interpolation.
+        if (self.active) then self:Measure(now); else self:ResetMeasurement(); end
     end
 
     function self:RequestSpeed(value)
@@ -260,6 +304,10 @@ local controller = Gear.NewController({
     phase = function() if (worldActive and type(AZS_GetPhase) == "function") then return AZS_GetPhase(); end end,
     isSolo = isSolo,
     runTime = function() if (type(AZS_GetRunTime) == "function") then return AZS_GetRunTime(); end end,
+    clientClock = function() if (type(GetTime) == "function") then return GetTime(); end end,
+    rawRunSample = function()
+        if (type(AZS_RUN) == "table") then return { t = AZS_RUN.t, updated = AZS_RUN_UPDATED }; end
+    end,
     register = registerBridge,
     send = function(command) SetCVar(COMMAND_CVAR, command); return true; end,
     pulse = function()

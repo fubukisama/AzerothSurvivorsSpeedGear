@@ -18,13 +18,16 @@ for code, catalog in pairs(AZSSpeedGearI18n.catalogs) do
 end
 
 local function fixture(available, pulseMode)
-    local state = { now = 1800000000, run = 0, phase = "ready", solo = true, sent = {}, pulses = {} };
+    local state = { now = 1800000000, run = 0, client = 1000, rawT = 0, rawUpdated = 1000,
+        phase = "ready", solo = true, sent = {}, pulses = {} };
     local api = {
         now = function() return state.now; end,
         random = function() return 321; end,
         phase = function() return state.phase; end,
         isSolo = function() return state.solo; end,
         runTime = function() return state.run; end,
+        clientClock = function() return state.client; end,
+        rawRunSample = function() return { t = state.rawT, updated = state.rawUpdated }; end,
         register = function() return available ~= false; end,
         send = function(command) table.insert(state.sent, command); return true; end
     };
@@ -45,12 +48,22 @@ local function latest(state)
 end
 
 local function advanceFixture(state, controller, seconds, rate)
-    local step = 1;
-    while (step <= seconds) do
-        state.now = state.now + 1;
-        state.run = state.run + rate;
+    local startNow, startRun, startClient = state.now, state.run, state.client;
+    local frame = 1;
+    local published = 0;
+    while (frame <= seconds * 60) do
+        local elapsed = frame / 60;
+        state.now = startNow + math.floor(elapsed + 1e-9);
+        state.run = startRun + rate * elapsed;
+        state.client = startClient + elapsed;
+        local publication = math.floor((elapsed + 1e-9) / 0.2);
+        if (publication > published) then
+            state.rawT = startRun + rate * publication * 0.2;
+            state.rawUpdated = startClient + publication * 0.2;
+            published = publication;
+        end
         controller:Update();
-        step = step + 1;
+        frame = frame + 1;
     end
 end
 
@@ -73,7 +86,7 @@ state.now = state.now + 1;
 state.run = 15;
 controller:Update();
 check(table.getn(state.sent) == count, "three seconds no longer dirties fallback config");
-check(controller.measured == 5, "measured actual x5 from the complete aligned observation");
+check(controller.confirmedSpeed100 == nil, "sparse smooth-clock samples alone cannot confirm x5");
 advanceFixture(state, controller, 2, 5);
 check(table.getn(state.sent) == count + 1, "fallback heartbeat writes at five real seconds");
 
@@ -177,12 +190,12 @@ check(not noPhase.active and string.find(latest(unknown), "|100|0$") ~= nil, "mi
 local measured, meter = fixture();
 measured.phase = "playing";
 meter:Update();
-advanceFixture(measured, meter, 2, 1);
-check(meter.measured == 1, "actual x1 displayed despite requested speed being independent");
+advanceFixture(measured, meter, 4, 1);
+check(meter.measured and math.abs(meter.measured - 1) < 0.05, "actual x1 displayed from fresh raw observations");
 meter:RequestSpeed(500);
 check(meter.measured == nil, "speed request clears old measurement");
-advanceFixture(measured, meter, 2, 1);
-check(meter.measured == 1 and meter.speed100 == 500, "failed acceleration is honestly measured x1");
+advanceFixture(measured, meter, 4, 1);
+check(meter.measured and math.abs(meter.measured - 1) < 0.05 and meter.speed100 == 500, "failed acceleration is honestly measured x1");
 measured.run = 0;
 meter:Update();
 check(meter.speed100 == 100 and meter.desiredSpeed100 == 100, "significant run-time rollback starts a new run at x1");
@@ -206,8 +219,7 @@ while (second <= 3) do
     second = second + 1;
 end
 check(runReads == 6, "each Update reads the native run clock once");
-check(jitterMeter.measured == 1, "small server corrections preserve complete aligned measurements");
-check(jitterMeter.previousRun == 103, "small rollback retains observed high-water mark");
+check(jitterMeter.confirmedSpeed100 == nil, "smooth-clock corrections without raw publications remain unconfirmed");
 -- An unchanged high-water mark is not evidence of a running simulation.
 second = 4;
 while (second <= 6) do
@@ -221,10 +233,10 @@ check(jitterMeter.measured == nil, "frozen clock with jitter cannot produce a po
 jitter.now = jitter.now + 1;
 jitter.run = 101.5;
 jitterMeter:Update();
-check(jitterMeter.measured == nil and jitterMeter.measureStart == nil,
+check(jitterMeter.measured == nil and jitterMeter.confirmedSpeed100 == nil,
     "significant rollback clears measurement and waits for another observed boundary");
-advanceFixture(jitter, jitterMeter, 2, 1);
-check(jitterMeter.measured == 1, "measurement resumes from the significant-rollback baseline");
+advanceFixture(jitter, jitterMeter, 4, 1);
+check(jitterMeter.measured and math.abs(jitterMeter.measured - 1) < 0.05, "fresh raw observations restore measurement after rollback");
 
 local aligned, alignedMeter = fixture();
 aligned.phase = "playing";
@@ -238,13 +250,13 @@ check(alignedMeter.measured == nil and alignedMeter.confirmedSpeed100 == nil,
 aligned.now = aligned.now + 1;
 aligned.run = 105;
 alignedMeter:Update();
-check(alignedMeter.measured == nil and alignedMeter.measureRun == 105,
-    "first later integer-second sample becomes an anchor rather than a measured rate");
+check(alignedMeter.confirmedSpeed100 == nil,
+    "later coarse samples without a fresh raw publication remain uncertain");
 aligned.now = aligned.now + 1;
 aligned.run = 110;
 alignedMeter:Update();
-check(alignedMeter.measured == 5 and alignedMeter.confirmedSpeed100 == 500,
-    "one complete boundary-aligned second can confirm the requested speed");
+check(alignedMeter.confirmedSpeed100 == nil,
+    "one coarse second cannot manufacture confirmation from smooth-clock values");
 alignedMeter:RequestSpeed(100);
 check(alignedMeter.measured == nil and alignedMeter.confirmedSpeed100 == nil,
     "every request invalidates both measured and confirmed state");
@@ -263,6 +275,7 @@ local writes = {};
 local queries = {};
 local wall = 1800001000;
 local runClock = 0;
+local uiClientClock = 1000;
 local gamePhase = "playing";
 local function frameStub(name)
     local frame = { shown = true, scripts = {}, fontStrings = {} };
@@ -311,6 +324,9 @@ GetNumRaidMembers = function() return 0; end;
 AZS_PARTY = {};
 AZS_GetPhase = function() return gamePhase; end;
 AZS_GetRunTime = function() return runClock; end;
+AZS_RUN = { t = 0 };
+AZS_RUN_UPDATED = 1000;
+GetTime = function() return uiClientClock; end;
 time = function() return wall; end;
 SlashCmdList = {};
 AZSSpeedGearDB = { show = false, point = "CENTER", relativePoint = "CENTER", x = 35, y = -40 };
@@ -324,12 +340,24 @@ local function fire(name, argument)
     driver.scripts.OnEvent();
 end
 local function advanceUI(seconds, rate)
-    local step = 1;
-    while (step <= seconds) do
-        wall = wall + 1;
-        runClock = runClock + rate;
+    -- Physical observation cadence and client clock are fixed independently of
+    -- the requested speed. Only this explicit actual-rate oracle moves raw t.
+    local startWall, startRun, startClient = wall, runClock, uiClientClock;
+    local frame = 1;
+    local published = 0;
+    while (frame <= seconds * 60) do
+        local elapsed = frame / 60;
+        wall = startWall + math.floor(elapsed + 1e-9);
+        runClock = startRun + rate * elapsed;
+        uiClientClock = startClient + elapsed;
+        local publication = math.floor((elapsed + 1e-9) / 0.2);
+        if (publication > published) then
+            AZS_RUN.t = startRun + rate * publication * 0.2;
+            AZS_RUN_UPDATED = startClient + publication * 0.2;
+            published = publication;
+        end
         driver.scripts.OnUpdate();
-        step = step + 1;
+        frame = frame + 1;
     end
 end
 local function hasPanelText(text)
@@ -357,7 +385,7 @@ advanceUI(5, 1);
 check(table.getn(writes) == beforeHeartbeat + 1, "hidden panel keeps real-time heartbeat");
 check(table.getn(queries) == queriesBeforeHeartbeat + 5 and queries[table.getn(queries)] == "AZSSpeedGearCommand",
     "hidden panel retains one-second queries of only the owned command CVar");
-check(AZSSpeedGear.controller.measured == 1, "production measurement reports actual x1 for x2 request");
+check(AZSSpeedGear.controller.measured and math.abs(AZSSpeedGear.controller.measured - 1) < 0.05, "production measurement reports fresh raw x1 for x2 request");
 AZS_PARTY = { { name = "Friend" } };
 driver.scripts.OnUpdate();
 check(not AZSSpeedGear.controller.active and string.find(cvars.AZSSpeedGearCommand, "|100|0$") ~= nil, "AZS_PARTY blocks stale zero native party counts");
@@ -514,35 +542,35 @@ SlashCmdList.AZSSPEEDGEAR("2");
 local launcherCaption = AZSSpeedGearI18n.Text("launcher");
 check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == launcherCaption .. " …",
     "new x2 request shows pending rather than an unverified success");
-advanceUI(2, 2);
-check(AZSSpeedGear.controller.measured == 2, "launcher x2 confirmation uses measured game progress");
+advanceUI(4, 2);
+check(AZSSpeedGear.controller.measured and math.abs(AZSSpeedGear.controller.measured - 2) < 0.05, "launcher x2 confirmation uses independent raw progress");
 check(not AZSSpeedGear.panel.shown and AZSSpeedGear.launcher.text == launcherCaption .. " ×2",
     "confirmed x2 appears on launcher while main panel is hidden");
 
 SlashCmdList.AZSSPEEDGEAR("5");
 check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == launcherCaption .. " …",
     "requesting x5 immediately removes the old confirmed x2 caption");
-advanceUI(2, 1);
-check(AZSSpeedGear.controller.measured == 1 and AZSSpeedGear.controller.speed100 == 500,
+advanceUI(4, 1);
+check(AZSSpeedGear.controller.measured and math.abs(AZSSpeedGear.controller.measured - 1) < 0.05 and AZSSpeedGear.controller.speed100 == 500,
     "failed x5 switch retains honest measured x1");
 check(AZSSpeedGear.launcher.text == launcherCaption .. " …",
     "measured x1 cannot confirm a requested x5 launcher suffix");
 
 SlashCmdList.AZSSPEEDGEAR("0.5");
-advanceUI(2, 0.5);
-check(AZSSpeedGear.controller.measured == 0.5 and AZSSpeedGear.launcher.text == launcherCaption .. " ×0.5",
+advanceUI(4, 0.5);
+check(AZSSpeedGear.controller.measured and math.abs(AZSSpeedGear.controller.measured - 0.5) < 0.05 and AZSSpeedGear.launcher.text == launcherCaption .. " ×0.5",
     "confirmed fractional x0.5 uses a compact decimal suffix");
 SlashCmdList.AZSSPEEDGEAR("0.5");
-advanceUI(2, 0.25);
-check(AZSSpeedGear.controller.measured == 0.25, "low-speed mismatch fixture measures actual x0.25");
+advanceUI(4, 0.25);
+check(AZSSpeedGear.controller.measured and math.abs(AZSSpeedGear.controller.measured - 0.25) < 0.05, "low-speed mismatch fixture measures actual x0.25");
 check(AZSSpeedGear.launcher.text == launcherCaption .. " …",
     "requested x0.5 with actual x0.25 cannot use the panel's broad absolute tolerance");
 
 SlashCmdList.AZSSPEEDGEAR("stop");
 check(AZSSpeedGear.controller.speed100 == 100 and AZSSpeedGear.controller.measured == nil
     and AZSSpeedGear.launcher.text == launcherCaption .. " …", "emergency x1 remains pending until measured");
-advanceUI(2, 1);
-check(AZSSpeedGear.controller.measured == 1 and AZSSpeedGear.launcher.text == launcherCaption .. " ×1",
+advanceUI(4, 1);
+check(AZSSpeedGear.controller.measured and math.abs(AZSSpeedGear.controller.measured - 1) < 0.05 and AZSSpeedGear.launcher.text == launcherCaption .. " ×1",
     "emergency restore gains a confirmed x1 suffix only after measurement");
 gamePhase = "paused";
 driver.scripts.OnUpdate();
@@ -552,15 +580,13 @@ check(not AZSSpeedGear.controller.active and AZSSpeedGear.controller.measured ==
 gamePhase = "playing";
 driver.scripts.OnUpdate();
 SlashCmdList.AZSSPEEDGEAR("2");
-advanceUI(2, 2);
+advanceUI(4, 2);
 check(AZSSpeedGear.launcher.text == launcherCaption .. " ×2", "same-run resumed x2 can be confirmed again");
 local confirmedSpeed = AZSSpeedGear.controller.speed100;
 local confirmedLauncherX = AZSSpeedGear.launcher.x;
 local confirmedLauncherY = AZSSpeedGear.launcher.y;
 AZSSpeedGearNativeLocale = "ja";
-wall = wall + 1;
-runClock = runClock + 2;
-driver.scripts.OnUpdate();
+advanceUI(1, 2);
 check(AZSSpeedGearI18n.code == "ja" and AZSSpeedGear.launcher.text == AZSSpeedGearI18n.catalogs.ja.launcher .. " ×2",
     "Japanese refresh preserves the confirmed suffix after rebinding captions");
 check(AZSSpeedGear.launcher.width > 64 and AZSSpeedGear.launcher.width <= 160,
@@ -595,9 +621,9 @@ check(switchingNotice ~= nil, "unconfirmed request retains a visible switching n
 sampleBaseline(1, 5);
 check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == baselineCaption .. " …",
     "baseline x5 remains pending after one integer clock tick");
-sampleBaseline(1, 5);
-check(AZSSpeedGear.controller.measured == 5 and AZSSpeedGear.launcher.text == baselineCaption .. " ×5",
-    "x5 confirms after the next whole-second anchor plus one complete observed second");
+sampleBaseline(3, 5);
+check(AZSSpeedGear.controller.measured and math.abs(AZSSpeedGear.controller.measured - 5) < 0.05 and AZSSpeedGear.launcher.text == baselineCaption .. " ×5",
+    "x5 confirms only after a sufficiently bounded raw observation window");
 check(switchingNotice.text == AZSSpeedGearI18n.Text("hint"), "confirmed speed clears the stale switching notice even with panel hidden");
 print("BASELINE request->CVar=0 fixture ticks; request->launcher-confirm=" .. (wall - requestedAt)
     .. " integer seconds (perfect immediate x5 response; native latency not modeled)");
@@ -614,9 +640,9 @@ while (rapidIndex <= table.getn(rapidSpeeds)) do
         "rapid switch cannot inherit a previous measurement " .. rapidIndex);
     rapidIndex = rapidIndex + 1;
 end
-sampleBaseline(1, 5);
+sampleBaseline(3, 5);
 check(AZSSpeedGear.launcher.text == baselineCaption .. " ×5", "rapid-switch sequence confirms only after settling on its final target");
-print("BASELINE rapid 1<->5: 6 requests one integer second apart; stale success captions=0; final confirmation=2 ticks after final request");
+print("BASELINE rapid 1<->5: 6 requests one integer second apart; stale success captions=0; confirmation follows a bounded raw observation window");
 
 local transientPhases = { "choosing", "paused" };
 local transientIndex = 1;
@@ -635,29 +661,30 @@ while (transientIndex <= table.getn(transientPhases)) do
         and string.find(writes[beforeTransient + 1], "|100|0$") ~= nil
         and string.find(writes[beforeTransient + 2], "|500|1$") ~= nil,
         "same-second transient emits inactive then active commands " .. transientPhases[transientIndex]);
-    sampleBaseline(2, 5);
+    sampleBaseline(4, 5);
     check(AZSSpeedGear.launcher.text == baselineCaption .. " ×5", "transient resume requires a new full measurement window");
     transientIndex = transientIndex + 1;
 end
-print("BASELINE short choosing/paused: same-second active0->active1, desired x5 retained, confirmation cleared then re-earned after 2 ticks");
+print("BASELINE short choosing/paused: same-second active0->active1, desired x5 retained, confirmation requires new bounded raw observations");
 print("SEAM LIMIT: integer time() cannot establish a 0.2s delay or whether both CVar values reached native code before config coalescing");
 
-sampleBaseline(1, 4.4);
-check(AZSSpeedGear.controller.speed100 == 500 and AZSSpeedGear.launcher.text == baselineCaption .. " ×5",
-    "already confirmed x5 survives a small measured-rate deviation without caption flicker");
-sampleBaseline(1, 4.9);
+sampleBaseline(4, 4.4);
+check(AZSSpeedGear.controller.speed100 == 500 and AZSSpeedGear.controller.confirmedSpeed100 == nil
+    and AZSSpeedGear.launcher.text == baselineCaption .. " …",
+    "sustained twelve-percent deviation revokes x5 confirmation within the bounded grace period");
+sampleBaseline(8, 4.9);
 check(AZSSpeedGear.controller.speed100 == 500 and AZSSpeedGear.launcher.text == baselineCaption .. " ×5",
     "same target regains its success caption when a later measured window matches");
-print("BASELINE caption variability at fixed target x5: observed windows x5 -> x4.4 -> x4.9 retain confirmed with hysteresis");
-sampleBaseline(1, 1);
-check(AZSSpeedGear.controller.measured == 1 and AZSSpeedGear.controller.confirmedSpeed100 == nil
+print("BASELINE fixed target x5: sustained x4.4 revokes confirmation; fresh x4.9 observations can re-establish it");
+sampleBaseline(4, 1);
+check(AZSSpeedGear.controller.confirmedSpeed100 == nil
     and AZSSpeedGear.launcher.text == baselineCaption .. " …", "a clear speed failure immediately revokes prior confirmation");
 sampleBaseline(1, 4.4);
 check(AZSSpeedGear.controller.confirmedSpeed100 == nil and AZSSpeedGear.launcher.text == baselineCaption .. " …",
     "hysteresis cannot grant a fresh confirmation outside the strict entry threshold");
-sampleBaseline(1, 4.9);
+sampleBaseline(8, 4.9);
 check(AZSSpeedGear.controller.confirmedSpeed100 == 500, "matching observation can re-establish confirmation after a real mismatch");
-sampleBaseline(1, 0);
+sampleBaseline(4, 0);
 check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.controller.confirmedSpeed100 == nil
     and AZSSpeedGear.launcher.text == baselineCaption .. " …", "a frozen run clock cannot retain a successful speed caption");
 ConsoleExec = nil;

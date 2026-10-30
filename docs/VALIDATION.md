@@ -1,5 +1,32 @@
 # Validation — updated 2026-10-31
 
+## Version 0.6.2 speed measurement and licensing
+
+The pre-fix remote run
+[41096103400](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41096103400)
+passed 21 of 22 CTests and failed the new real-controller regression: an
+independent constant 4x clock was falsely confirmed as the requested 2x under
+irregular integer-second observations. The production-DLL timing models passed;
+their numbers and limits are recorded in [the speed investigation](SPEEDINVESTIGATION.md).
+
+The revised controller uses raw `AZS_RUN.t`/`AZS_RUN_UPDATED`, not interpolated
+`AZS_GetRunTime()`, for rate estimation. New fixtures supply independent physical,
+UI and raw publication clocks and cover sparse observations, frozen raw packets,
+wrong rates and valid progress. Optional `GetTime` bounds sampling phase and
+cached snapshot age using the supported minimum clock rate of 0.25 and a 20ms
+virtual-time margin. It is never divided by the requested multiplier to invent
+wall time. This assumes an unclamped client clock; unknown publication/queue
+latency remains outside the estimate. Missing precision or fresh progress must
+leave confirmation pending. This is an observed run-clock estimate, not proof
+that movement or skills match the same rate.
+
+The disposable game workflow downloads official assets only into the ephemeral
+Windows runner and compares no-DLL, hooked 1x and hooked 2x observations using an
+unhooked parent FILETIME clock. Only a bounded numerical report is retained.
+Unavailable rendering, input or metrics produce blocked evidence rather than
+successful real-game acceptance. GPL-3.0-or-later applies to new project releases;
+the complete GPLv3 text and original dependency licenses accompany the package.
+
 ## Version 0.6.1 addon description language
 
 Remote-only fixtures cover fourteen fixed description values, English fallback,

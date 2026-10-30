@@ -1,5 +1,10 @@
 # AzerothSurvivorsSpeedGear
 
+Version 0.6.2 corrects a false speed-confirmation case caused by coarse wall
+clock sampling. Confirmation observes raw run snapshots, rather than the
+interpolated display getter, and waits for a sufficiently bounded observation.
+New releases use **GPL-3.0-or-later**; dependency notices retain their licenses.
+
 Since 0.6.1 the addon-list description follows the game's saved language across
 all fourteen supported languages, while the title remains **AzerothSurvivorsSpeedGear**.
 Restart after changing language to refresh cached addon metadata. The native
@@ -48,7 +53,7 @@ files, assets or saves are distributed here.
    .\scripts\Install.ps1 -GamePath 'D:\Games\AzerothSurvivors\AzerothSurvivors.exe'
    ```
 
-4. Start the original game, enable **AZS Speed Gear** in **Options → AddOns**,
+4. Start the original game, enable **AzerothSurvivorsSpeedGear** in **Options → AddOns**,
    and enter a solo run. Use `/azsg` or `/speedgear` to show the panel.
 
 The package installs `AddOns/AZSSpeedGear` under the game's `benilla-config`
@@ -94,10 +99,15 @@ infer a connected channel from the presence of `ConsoleExec`. The addon-list
 and panel title are always **AzerothSurvivorsSpeedGear**; controls retain all
 fourteen game languages.
 
-The launcher confirms actual speed using a complete one-second observation window
-after the next integer-second boundary (usually 1–2 seconds). This display delay
-is separate from command delivery. Small measurement fluctuations retain an
-existing confirmation; a new request, substantial mismatch or freeze clears it.
+The launcher compares fresh raw game-time progress against wall-clock observations.
+It accounts for integer-second sampling uncertainty instead of treating two late
+observations as exact second boundaries. Sparse samples can take longer to establish
+confirmation; missing or frozen raw snapshots cannot confirm an interpolated clock.
+This display delay is separate from command delivery. A new request, substantial
+mismatch, freeze or pause clears confirmation. This estimates the observed run
+clock, rather than certifying movement, skill behavior or native receipt.
+See the [speed investigation](docs/SPEEDINVESTIGATION.md) for reproduced evidence
+and the limits of the native timing models.
 
 ## Compatibility
 

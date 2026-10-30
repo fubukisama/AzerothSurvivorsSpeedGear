@@ -2,7 +2,7 @@
 param([string]$Configuration = 'Release')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$version = '0.6.1'
+$version = '0.6.2'
 $package = Join-Path $root ('dist\AZSSpeedGear-' + $version + '-Windows-x64')
 if (Test-Path -LiteralPath $package) { throw 'Package folder already exists; use a new clean output directory.' }
 foreach ($directory in @('AddOns','Native','scripts','docs','licenses')) {
@@ -33,6 +33,7 @@ foreach ($file in @('Install.ps1','Uninstall.ps1','Status.ps1','Update.ps1','Sta
 foreach ($file in @('README.md','README.zh-CN.md','LICENSE','THIRD_PARTY_NOTICES.md')) { Copy-Item -LiteralPath (Join-Path $root $file) -Destination (Join-Path $package $file) }
 Copy-Item -LiteralPath (Join-Path $root 'docs\COMPATIBILITY.md') -Destination (Join-Path $package 'docs\COMPATIBILITY.md')
 if (Test-Path -LiteralPath (Join-Path $root 'docs\VALIDATION.md')) { Copy-Item -LiteralPath (Join-Path $root 'docs\VALIDATION.md') -Destination (Join-Path $package 'docs\VALIDATION.md') }
+Copy-Item -LiteralPath (Join-Path $root 'docs\SPEEDINVESTIGATION.md') -Destination (Join-Path $package 'docs\SPEEDINVESTIGATION.md')
 Copy-Item -LiteralPath (Join-Path $root 'third_party\azs-speed-controller\LICENSE') -Destination (Join-Path $package 'licenses\AZS-Speed-Controller-MIT.txt')
 Copy-Item -LiteralPath (Join-Path $root 'third_party\minhook\LICENSE.txt') -Destination (Join-Path $package 'licenses\MinHook-BSD.txt')
 $manifest = foreach ($file in Get-ChildItem -LiteralPath $package -File -Recurse) {
