@@ -59,7 +59,11 @@ function Read-AZSGJson([string]$Path, [long]$MaximumBytes = 1MB) {
     }
     $text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
     if ([Text.Encoding]::UTF8.GetByteCount($text) -gt $MaximumBytes) { throw "Oversized JSON file: $Path" }
-    return ConvertFrom-Json -InputObject $text
+    # Windows PowerShell emits a JSON array as one pipeline object, whereas
+    # newer hosts enumerate it. Return the parsed value through the function
+    # so callers using @(Read-AZSGJson ...) see the same item count on both.
+    $parsed = ConvertFrom-Json -InputObject $text
+    return $parsed
 }
 
 function Get-AZSGGame([string]$Path) {
@@ -321,7 +325,9 @@ function Assert-AZSGPackage([string]$Root, [string]$Version, [string]$ManifestSH
     }
     $manifest = @(Read-AZSGJson $manifestPath)
     $actual = @(Get-AZSGPackageFiles $root)
-    if ($actual.Count -lt 18 -or $actual.Count -gt 100 -or $manifest.Count -ne $actual.Count - 1) { throw 'Package manifest does not enumerate every payload file.' }
+    if ($actual.Count -lt 18 -or $actual.Count -gt 100 -or $manifest.Count -ne $actual.Count - 1) {
+        throw ('Package manifest does not enumerate every payload file (entries={0}, files={1}).' -f $manifest.Count, $actual.Count)
+    }
     $expected = @{}
     foreach ($file in $manifest) {
         $names = @($file.PSObject.Properties.Name)
