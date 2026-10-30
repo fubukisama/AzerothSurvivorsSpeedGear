@@ -204,5 +204,10 @@ or modify the game. CI uses a synthetic simulation host and needs no game files.
 
 ## License
 
-[MIT](LICENSE), with retained MIT attribution for AZS Speed Controller and the
-BSD-2-Clause notices for MinHook/HDE. See [third-party notices](THIRD_PARTY_NOTICES.md).
+New releases of AzerothSurvivorsSpeedGear use **GPL-3.0-or-later**: the GNU
+General Public License, version 3 or, at your option, any later version. You may
+redistribute and modify the project under those terms; the complete GPLv3 text
+is in [LICENSE](LICENSE).
+
+AZS Speed Controller and MinHook/HDE retain their original MIT and BSD-2-Clause
+licenses and copyright notices. See [third-party notices](THIRD_PARTY_NOTICES.md).

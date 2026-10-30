@@ -117,6 +117,12 @@ GitHub 的独立工作流每六小时读取[官方原生更新清单](https://wo
 
 出现不支持状态、速度与计时不一致或异常时先恢复 1×，正常退出游戏，并保留当时的游戏版本、EXE 哈希及游戏目录里的 `AZSSpeedGear.log`。尚未完成的实机测试不能用构建成功或安装成功替代。
 
+## 许可证
+
+AzerothSurvivorsSpeedGear 的新发布版本采用 **GPL-3.0-or-later**，即 GNU 通用公共许可证第 3 版或由你选择的任何后续版本。你可以按照这些条款再分发和修改本项目，完整 GPLv3 正文见 [LICENSE](LICENSE)。
+
+AZS Speed Controller、MinHook/HDE 继续保留各自的 MIT、BSD-2-Clause 许可证及版权归属，详见 [第三方说明](THIRD_PARTY_NOTICES.md)。
+
 ## 源码与构建
 
 源码和许可证完整提供。已复用 AZS Speed Controller 的 MIT 连续时钟设计及 MinHook 1.3.4 的实际源码，归属与完整许可见 [第三方说明](THIRD_PARTY_NOTICES.md)。

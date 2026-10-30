@@ -1,4 +1,12 @@
-# Third-party sources
+# Licensing and third-party sources
+
+New releases of AzerothSurvivorsSpeedGear are distributed under
+**GPL-3.0-or-later** (GNU General Public License version 3 or any later version).
+Copyright (c) 2026 AZSSpeedGear contributors. The complete, unmodified GPLv3
+license text is provided in [LICENSE](LICENSE).
+
+The third-party components below retain their original licenses and copyright
+notices. This project's GPL license does not replace those license texts.
 
 - AZS Speed Controller, MIT, copyright 2026 AZS Speed Controller contributors.
   Source: https://github.com/Maidenquinn/AZS-Speed-Controller
