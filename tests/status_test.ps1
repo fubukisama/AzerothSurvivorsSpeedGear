@@ -112,8 +112,11 @@ try {
     Assert-InvalidFixture $state 'unknown_schema' 'unknown schema is rejected'
     $state = New-FixtureState; $state.product = 'AnotherProduct'
     Assert-InvalidFixture $state 'unknown_product' 'foreign product is rejected'
+    $state = New-FixtureState; $state.version = '0.5.0-beta'
+    Assert-InvalidFixture $state 'unknown_version' 'non-stable version syntax is rejected'
     $state = New-FixtureState; $state.version = '0.5.0'
-    Assert-InvalidFixture $state 'unknown_version' 'unknown version is rejected'
+    Write-Fixture ($state | ConvertTo-Json)
+    Assert-StatusTest ((Read-Fixture).state -eq 'ready') 'schema-compatible stable version is readable'
     $state = New-FixtureState; $state.backend = 'mystery'
     Assert-InvalidFixture $state 'unknown_backend' 'unknown backend is rejected'
     $state = New-FixtureState; $state.transport = 'maybe'

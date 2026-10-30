@@ -72,6 +72,20 @@ Lua 面板通过 `SG1` 协议的 `AZSSpeedGearCommand` 自定义 CVar 请求倍�
 
 ## 更新与兼容
 
+0.5.0 提供独立的启动更新入口。安装发布包后，可运行：
+
+```powershell
+.\scripts\Start.ps1 -GamePath 'E:\path\AzerothSurvivors.exe'
+```
+
+入口在启动前检查本项目 GitHub 的最新正式 Release，校验包大小、GitHub 提供的 SHA-256 和完整文件清单，再调用已安装的事务安装器；游戏退出后再次检查，覆盖游戏在运行期间更新 EXE 的情况。游戏运行时不覆盖原生 DLL，不强制结束游戏，旧安装和配置保持备份。网络失败会保留现有安装并明确提示检查未完成。需要跳过联网检查时使用 `-SkipUpdate`。
+
+已有原生扫描仍在每次正常加载时重新定位地址；使用启动更新入口才能同时获得插件文件的自动升级。游戏自身的更新交给游戏，本项目更新入口负责本插件及其匹配信息。检查结果独立记录于 `benilla-config/AZSSpeedGear-updates/update-state.json`。
+
+GitHub 的独立工作流每六小时读取[官方原生更新清单](https://wow.aethus.pl/exe/latest.json)，发现新 EXE 指纹或扫描器变更后，在临时远端 runner 校验并只读扫描官方 EXE，检查加载所需导入和负向扫描用例。它不运行游戏，也不将游戏文件放入本仓库或 Release。结果写入 [compatibility/windows.json](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/blob/main/compatibility/windows.json)。
+
+报告的 `structural_only` 仅表示检查过的结构仍匹配，不能代表对局行为已验证；没有匹配记录显示 `unknown`，不支持的结构显示 `unsupported`。未来引擎、Lua API 或加载机制发生破坏性变化时，仍需要维护新的适配并发布修复；启动入口可获取后续修复。更新器不会从兼容报告读取地址、执行补丁或跳过原生扫描校验。
+
 安装新发布包前退出游戏，再运行新包里的安装器。安装器只会更新具有有效安装收据、且当前文件 SHA-256 全部匹配的旧版本；旧插件目录、原生 DLL 和收据会移入独立备份目录。无法证明归属的现有 `dwmapi.dll` 或同名插件目录会导致安装停止。
 
 “自动适配”指后端启动时扫描并验证当前版本所需的模拟等待结构，尽量避免绑定某一个 EXE 哈希。**这不保证未来所有版本都兼容。** 结构未知、扫描结果不唯一或验证失败时保持原速，并在日志记录禁用原因；面板根据实测倍率提示未达到目标速度。不能把任意匹配的地址当作可用变速入口。该机制也不是联网下载或自动更新本项目文件的功能。

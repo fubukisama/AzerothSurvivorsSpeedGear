@@ -100,7 +100,7 @@ ambiguous structures disable acceleration and record the reason in
 
 **Runtime detection cannot guarantee compatibility with every future version.**
 Changes to compiler output, scheduling, DWM loading, CVar persistence or addon
-APIs can require maintenance. This is not an online updater.
+APIs can require maintenance.
 
 Version 0.1.0 was loaded in game **0.130.0** together with SurvivorsDragonUi and
 AZSSpellMeter. The panel measured approximately **1.00x and 2.00x**. A 5x request
@@ -110,13 +110,40 @@ multiplayer and Wine/Linux have not been validated in the real game. Read
 [compatibility details](docs/COMPATIBILITY.md) and [validation evidence](docs/VALIDATION.md).
 
 The native component hooks timing functions in the game process. It does not
-patch the EXE on disk. No network updater or telemetry is implemented.
+patch the EXE on disk. No gameplay telemetry is implemented. The optional update
+entry point contacts the fixed GitHub project for stable packages and compatibility
+records; it does not upload local game files or saved data.
 
 ## Update or uninstall
 
 Exit the game and use the new release's installer to update. Installation receipts
 and SHA-256 checks establish which files belong to this addon; changed or unknown
 files cause a refusal. Previous owned versions are moved to backups.
+
+Version 0.5.0 includes an independent update-aware entry point:
+
+```powershell
+.\scripts\Start.ps1 -GamePath 'E:\path\AzerothSurvivors.exe'
+```
+
+It checks the fixed project's latest stable GitHub Release before starting the
+game and checks again after the game exits. Package size, GitHub SHA-256 digest,
+ZIP paths and the complete file manifest are verified. Installation runs the
+already-owned installer, preserves backups and waits for the game to stop.
+Network failures retain the existing installation; `-SkipUpdate` skips checking.
+This updates the plugin; the game's own updater remains responsible for the game.
+Launching the original EXE continues runtime structure detection but does not
+perform the launcher's plugin-download checks.
+
+A separate scheduled Windows workflow reads the [official native manifest](https://wow.aethus.pl/exe/latest.json)
+every six hours. Changed game or scanner fingerprints trigger a temporary-runner
+download, hash verification and read-only scanner checks, including required DWM
+imports. No game executable is run or redistributed. The public
+[compatibility report](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/blob/main/compatibility/windows.json)
+records `structural_only` or `unsupported`; unrecognized hashes remain `unknown`.
+These are not gameplay certifications. Major engine/API changes still require
+maintainer fixes, which the launcher can retrieve once a new stable release exists.
+Compatibility records cannot supply executable patches or bypass native checks.
 The generated `NativeLocale.lua` is verified against its exact allowed format
 and language whitelist; every other managed file retains static hash checks.
 

@@ -160,8 +160,8 @@ function Get-BackendStatus([string]$SelectedPath) {
         }
         $schema = Convert-StatusUInt64 $data.schema 'schema'
         if ($schema -ne 1) { Stop-StatusRead 'unknown_schema' '不支持此状态文件 schema。' }
-        if ($data.version -isnot [string] -or $data.version -cne '0.4.0') {
-            Stop-StatusRead 'unknown_version' '状态文件版本必须为 0.4.0。'
+        if ($data.version -isnot [string] -or $data.version -cnotmatch '^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$') {
+            Stop-StatusRead 'unknown_version' '状态文件必须包含有效的正式版本号。'
         }
         $backends = @('initializing', 'ready', 'unsupported', 'hooks_failed')
         $transports = @('waiting', 'console', 'file', 'degraded', 'stale', 'disabled')

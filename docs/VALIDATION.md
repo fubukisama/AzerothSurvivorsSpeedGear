@@ -1,5 +1,21 @@
 # Validation — 2026-10-30
 
+## Version 0.5.0 update-following validation
+
+Updater, launcher and official-manifest monitor tests run only in remote CI.
+The launcher suite mocks process discovery, game launch and update helpers; it
+never starts the actual game. Updater fixtures exercise stable-release selection,
+fixed source URLs, archive and file-manifest integrity, pending installs and the
+owned installer boundary. Monitor fixtures exercise manifest bounds, gzip
+reconstruction, loader/import requirements and scanner verdicts without running
+official game code. The separate scheduled workflow checks the official EXE in
+an ephemeral Windows runner and publishes only JSON evidence.
+
+The launcher can retrieve released maintenance fixes. It cannot invent a correct
+adapter for an arbitrary new engine. Scanner success remains structural evidence;
+unknown or unsupported builds are never described as gameplay-tested. No local
+test, build, Probe, launcher or game/UI run is performed for this release.
+
 ## Version 0.4.0 validation scope
 
 This version is built and tested only on the remote GitHub Windows runner.

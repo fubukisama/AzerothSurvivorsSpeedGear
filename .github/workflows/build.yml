@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    paths-ignore: ['compatibility/**']
   pull_request:
   workflow_dispatch:
 
@@ -36,6 +37,13 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure
       - name: Save debounce regression model
         run: python tests/debounce_test.py
+      - name: Compatibility monitor parser tests
+        run: python tests/compatibility_monitor_test.py
+      - name: Windows PowerShell launcher and updater compatibility
+        shell: powershell
+        run: |
+          ./tests/updater_test.ps1
+          ./tests/launcher_test.ps1
       - name: Package
         run: ./scripts/Package.ps1
       - uses: actions/upload-artifact@v4
@@ -43,3 +51,47 @@ jobs:
           name: AZSSpeedGearWindowsX64
           path: dist/*.zip
           if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: AZSSpeedGearWindowsX64
+          path: package
+      - name: Publish verified stable package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          CI_RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          asset="AZSSpeedGear-${version}-Windows-x64.zip"
+          test -f "package/$asset"
+          (cd package && sha256sum "$asset" > SHA256SUMS.txt)
+          printf '%s\n\n%s\n%s\n\n%s\n' \
+            "AzerothSurvivorsSpeedGear ${version}" \
+            "Source commit: ${SOURCE_COMMIT}" \
+            "Remote CI: https://github.com/${GH_REPO}/actions/runs/${CI_RUN_ID}" \
+            'Built and tested on the remote Windows runner. Compatibility scans are structural evidence; gameplay and arbitrary future versions are not certified. Exit the game before updating. Configuration and owned-version backups are preserved.' > notes.md
+          if gh release view "$RELEASE_TAG" --json isDraft > release.json 2>/dev/null; then
+            if [ "$(python3 -c 'import json; print(json.load(open("release.json"))["isDraft"])')" != "True" ]; then
+              echo 'Published releases are immutable; leaving existing assets unchanged.'
+              exit 0
+            fi
+            gh release upload "$RELEASE_TAG" "package/$asset" package/SHA256SUMS.txt --clobber
+            gh release edit "$RELEASE_TAG" --notes-file notes.md
+          else
+            gh release create "$RELEASE_TAG" "package/$asset" package/SHA256SUMS.txt \
+              --verify-tag --draft --title "AzerothSurvivorsSpeedGear ${RELEASE_TAG}" --notes-file notes.md
+          fi
+          gh release edit "$RELEASE_TAG" --draft=false --latest

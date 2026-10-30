@@ -171,7 +171,7 @@ DWORD WINAPI worker(void*) {
     productionGame=_wcsicmp(exe.filename().c_str(),L"AzerothSurvivors.exe")==0;
     if(!productionGame && _wcsicmp(exe.filename().c_str(),L"AZSSpeedGearTestHost.exe")!=0) return 0;
     root=exe.parent_path();
-    log("AzerothSurvivorsSpeedGear 0.4.0 start; default=1x; protocol=SG1");
+    log("AzerothSurvivorsSpeedGear 0.5.0 start; default=1x; protocol=SG1");
     // Locale synchronization remains available even if a future timing layout is refused.
     auto localeThread=CreateThread(nullptr,0,languageWorker,nullptr,0,nullptr);
     if(localeThread) CloseHandle(localeThread);

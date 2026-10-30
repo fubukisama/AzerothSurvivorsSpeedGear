@@ -1,7 +1,7 @@
 ## Interface: 11200
 ## Title: AzerothSurvivorsSpeedGear
 ## Notes: 单人游戏倍速请求面板；需要 AzerothSurvivorsSpeedGear 原生后端。
-## Version: 0.4.0
+## Version: 0.5.0
 ## Author: AzerothSurvivorsSpeedGear contributors
 ## SavedVariables: AZSSpeedGearDB
 
