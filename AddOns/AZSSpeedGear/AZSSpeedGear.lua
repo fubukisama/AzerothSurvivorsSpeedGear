@@ -235,6 +235,7 @@ local dbReady = false;
 local captions = {};
 local noticeKey = "hint";
 local lastLocaleSecond = nil;
+local lastLauncherText = nil;
 
 local function bindText(widget, key)
     table.insert(captions, { widget = widget, key = key });
@@ -242,9 +243,9 @@ local function bindText(widget, key)
     return widget;
 end
 
-local function sizeLauncher()
+local function sizeLauncher(text)
     if (not launcher) then return; end
-    local text = tr("launcher");
+    text = text or tr("launcher");
     local width = 0;
     if (type(launcher.GetFontString) == "function") then
         local ok, font = pcall(launcher.GetFontString, launcher);
@@ -263,6 +264,27 @@ local function sizeLauncher()
         end
     end
     launcher:SetWidth(math.max(64, math.min(160, math.ceil(width + 20))));
+end
+
+local function measurementMatchesTarget()
+    if (not controller.active or not finiteNumber(controller.measured) or controller.measured <= 0) then return false; end
+    local target = controller.speed100 / 100;
+    return math.abs(controller.measured - target) <= target * 0.10;
+end
+
+local function updateLauncher()
+    if (not launcher) then return; end
+    local text = tr("launcher");
+    if (worldActive and controller.active) then
+        if (measurementMatchesTarget()) then text = text .. " ×" .. speedText(controller.speed100);
+        else text = text .. " …"; end
+    end
+    if (text ~= lastLauncherText) then
+        launcher:SetText(text);
+        lastLauncherText = text;
+        -- Resizing during native dragging would move the pointer's grab point.
+        if (not launcher.speedGearDragging) then sizeLauncher(text); end
+    end
 end
 
 local function chat(message)
@@ -296,6 +318,7 @@ local function setShown(shown)
 end
 
 local function render()
+    updateLauncher();
     if (not statusLabel) then return; end
     local status = "";
     if (not controller.bridgeReady) then
@@ -315,7 +338,7 @@ local function render()
     else
         status = string.format(tr("target_wait"), speedText(controller.speed100));
         if (controller.measured) then
-            if (math.abs(controller.measured - controller.speed100 / 100) > math.max(0.3, controller.speed100 / 300)) then
+            if (not measurementMatchesTarget()) then
                 status = tr("below_target");
             else status = string.format(tr("target_measured"), speedText(controller.speed100)); end
         end
@@ -387,8 +410,7 @@ local function buildLauncher()
     launcher:SetHeight(30);
     launcher:SetPoint("RIGHT", UIParent, "RIGHT", -24, 80);
     launcher:SetFrameStrata("DIALOG");
-    bindText(launcher, "launcher");
-    sizeLauncher();
+    updateLauncher();
     launcher:SetMovable(true);
     launcher:EnableMouse(true);
     launcher:RegisterForDrag("LeftButton");
@@ -415,6 +437,7 @@ local function buildLauncher()
             db.launcherX = x;
             db.launcherY = y;
         end
+        sizeLauncher(lastLauncherText);
     end);
     launcher:SetScript("OnClick", function()
         if (this.speedGearDragging or this.speedGearSuppressClick) then
@@ -537,7 +560,7 @@ I18n.Listen(function()
         entry.widget:SetText(tr(entry.key));
         index = index + 1;
     end
-    sizeLauncher();
+    updateLauncher();
     if (noticeLabel) then noticeLabel:SetText(tr(noticeKey)); end
     lastRendered = nil;
     render();
@@ -559,6 +582,7 @@ if (type(CreateFrame) == "function") then
             worldActive = false;
             showLauncher();
             controller:Shutdown();
+            updateLauncher();
         elseif (event == "ADDON_LOADED") then
             if (arg1 == "AZSSpeedGear") then loadSettings(); end
         elseif (event == "PLAYER_ENTERING_WORLD") then

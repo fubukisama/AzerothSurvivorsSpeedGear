@@ -1,5 +1,15 @@
 # Validation — 2026-10-30
 
+## Version 0.2.1 launcher rate
+
+The launcher now shows the requested rate only after a fresh measured rate is
+within 10 percent of that target. A pending request, pause or missing measurement
+removes the success suffix. Relative tolerance avoids incorrectly confirming 0.5x
+when the measured rate is 0.25x. Caption sizing measures the complete localized
+text and defers resizing during a drag. Lua regressions exercise real controller
+requests and clock progression, hidden-panel updates, language changes and reset
+behavior. The native backend is unchanged from 0.2.0.
+
 ## Version 0.2.0 UI and locale changes
 
 The new floating launcher appears on world entry, toggles the panel, and retains

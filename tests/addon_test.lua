@@ -376,6 +376,10 @@ fire("PLAYER_ENTERING_WORLD");
 check(AZSSpeedGearDB.show == false and not AZSSpeedGear.panel.shown and AZSSpeedGear.launcher.shown,
     "fresh install starts with launcher only");
 
+-- The original locale checks exercise idle captions; active measurement text is
+-- covered below, including a language switch after a confirmed speed change.
+gamePhase = "paused";
+driver.scripts.OnUpdate();
 local selectedSpeed = AZSSpeedGear.controller.speed100;
 local savedLauncherX = AZSSpeedGearDB.launcherX;
 AZSSpeedGearNativeLocale = "ja";
@@ -393,5 +397,83 @@ driver.scripts.OnUpdate();
 check(AZSSpeedGear.launcher.text == AZSSpeedGearI18n.catalogs.de.launcher, "floating launcher follows German selection");
 check(AZSSpeedGear.launcher.width >= 64 and AZSSpeedGear.launcher.width <= 160, "localized launcher stays within readable width limits");
 check(AZSSpeedGearDB.language == nil, "language synchronization does not persist an override");
+
+-- Confirmed launcher suffixes must come from the real measurement state machine.
+-- Never seed controller.measured directly: advance the wall and game clocks.
+AZSSpeedGearNativeLocale = "zh";
+gamePhase = "playing";
+AZS_PARTY = {};
+fire("PLAYER_LEAVING_WORLD");
+fire("PLAYER_ENTERING_WORLD");
+SlashCmdList.AZSSPEEDGEAR("hide");
+SlashCmdList.AZSSPEEDGEAR("2");
+local launcherCaption = AZSSpeedGearI18n.Text("launcher");
+check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == launcherCaption .. " …",
+    "new x2 request shows pending rather than an unverified success");
+wall = wall + 3;
+runClock = runClock + 6;
+driver.scripts.OnUpdate();
+check(AZSSpeedGear.controller.measured == 2, "launcher x2 confirmation uses measured game progress");
+check(not AZSSpeedGear.panel.shown and AZSSpeedGear.launcher.text == launcherCaption .. " ×2",
+    "confirmed x2 appears on launcher while main panel is hidden");
+
+SlashCmdList.AZSSPEEDGEAR("5");
+check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == launcherCaption .. " …",
+    "requesting x5 immediately removes the old confirmed x2 caption");
+wall = wall + 3;
+runClock = runClock + 3;
+driver.scripts.OnUpdate();
+check(AZSSpeedGear.controller.measured == 1 and AZSSpeedGear.controller.speed100 == 500,
+    "failed x5 switch retains honest measured x1");
+check(AZSSpeedGear.launcher.text == launcherCaption .. " …",
+    "measured x1 cannot confirm a requested x5 launcher suffix");
+
+SlashCmdList.AZSSPEEDGEAR("0.5");
+wall = wall + 4;
+runClock = runClock + 2;
+driver.scripts.OnUpdate();
+check(AZSSpeedGear.controller.measured == 0.5 and AZSSpeedGear.launcher.text == launcherCaption .. " ×0.5",
+    "confirmed fractional x0.5 uses a compact decimal suffix");
+SlashCmdList.AZSSPEEDGEAR("0.5");
+wall = wall + 4;
+runClock = runClock + 1;
+driver.scripts.OnUpdate();
+check(AZSSpeedGear.controller.measured == 0.25, "low-speed mismatch fixture measures actual x0.25");
+check(AZSSpeedGear.launcher.text == launcherCaption .. " …",
+    "requested x0.5 with actual x0.25 cannot use the panel's broad absolute tolerance");
+
+SlashCmdList.AZSSPEEDGEAR("stop");
+check(AZSSpeedGear.controller.speed100 == 100 and AZSSpeedGear.controller.measured == nil
+    and AZSSpeedGear.launcher.text == launcherCaption .. " …", "emergency x1 remains pending until measured");
+wall = wall + 3;
+runClock = runClock + 3;
+driver.scripts.OnUpdate();
+check(AZSSpeedGear.controller.measured == 1 and AZSSpeedGear.launcher.text == launcherCaption .. " ×1",
+    "emergency restore gains a confirmed x1 suffix only after measurement");
+gamePhase = "paused";
+driver.scripts.OnUpdate();
+check(not AZSSpeedGear.controller.active and AZSSpeedGear.controller.measured == nil
+    and AZSSpeedGear.launcher.text == launcherCaption, "pause removes all pending and confirmed launcher suffixes");
+
+gamePhase = "playing";
+driver.scripts.OnUpdate();
+SlashCmdList.AZSSPEEDGEAR("2");
+wall = wall + 3;
+runClock = runClock + 6;
+driver.scripts.OnUpdate();
+check(AZSSpeedGear.launcher.text == launcherCaption .. " ×2", "same-run resumed x2 can be confirmed again");
+local confirmedSpeed = AZSSpeedGear.controller.speed100;
+local confirmedLauncherX = AZSSpeedGear.launcher.x;
+local confirmedLauncherY = AZSSpeedGear.launcher.y;
+AZSSpeedGearNativeLocale = "ja";
+wall = wall + 1;
+runClock = runClock + 2;
+driver.scripts.OnUpdate();
+check(AZSSpeedGearI18n.code == "ja" and AZSSpeedGear.launcher.text == AZSSpeedGearI18n.catalogs.ja.launcher .. " ×2",
+    "Japanese refresh preserves the confirmed suffix after rebinding captions");
+check(AZSSpeedGear.launcher.width > 64 and AZSSpeedGear.launcher.width <= 160,
+    "fallback launcher width includes the complete Japanese caption and confirmed suffix");
+check(AZSSpeedGear.controller.speed100 == confirmedSpeed and AZSSpeedGear.launcher.x == confirmedLauncherX
+    and AZSSpeedGear.launcher.y == confirmedLauncherY, "confirmed caption localization preserves speed and launcher anchor");
 
 print("AZSSpeedGear addon state and protocol: " .. checks .. " checks passed");

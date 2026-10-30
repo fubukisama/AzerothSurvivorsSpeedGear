@@ -12,6 +12,11 @@ independently. Closing the panel keeps the floating button available. A new
 installation initially shows just the button; existing visibility preferences
 are retained.
 
+Once measured speed is close to the requested rate, the floating button shows
+that rate, for example **Speed ×2**. An ellipsis marks an unconfirmed change;
+pauses or missing confirmation remove the success rate. This uses run-time
+measurement rather than treating a request as a native acknowledgement.
+
 The UI follows the game's selected language on world entry, with complete
 catalogs for English, Simplified Chinese, Japanese, Korean, Polish, Czech,
 German, Portuguese, Spanish, French, Romanian, Turkish, Russian and Ukrainian.
