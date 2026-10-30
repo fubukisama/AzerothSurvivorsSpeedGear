@@ -56,12 +56,34 @@ or an unknown party state prevents activation.
 Version 0.3.0 queries the control CVar with `ConsoleExec` after setting it. The
 native component receives this synchronous console message through local stdout
 and stderr pipes, so switching and stopping no longer wait for a config save.
-Unrelated console output is forwarded unchanged and is not recorded. The config
+Unrelated console output is forwarded unchanged under normal load and is not recorded. The config
 file remains a fallback if game logging or a future update disables this path.
 Queries pulse once per real second; persisted payloads refresh every five seconds,
 allowing the game's save debounce to complete even at 0.25x. Both transports share
 session and sequence validation, so a delayed file cannot undo a newer request.
 If fresh control heartbeats stop, the backend returns to 1x after eight real seconds.
+
+Version 0.4.0 gives each output channel an independent forwarding worker and a
+bounded 256 KiB queue. A blocked launcher/console can no longer block control
+parsing. On output overload, the oldest queued log bytes may be dropped after
+their commands have already been parsed; the dropped-byte counter is diagnostic
+and does not count lost speed commands. Healthy console receipts reduce config
+scans from ten per second to one; missing pulses restore fast fallback polling.
+
+The panel and `/azsg status` identify the client's sending attempt, not a native
+acknowledgement. Actual validated receipt mode, backend setting, heartbeat age,
+file-read count and discarded forwarding bytes appear in `AZSSpeedGear-status.json`
+beside the game. To read or watch the live report from an extracted package:
+
+```powershell
+.\scripts\Status.ps1 -GamePath 'E:\path\AzerothSurvivors.exe' -Watch
+```
+
+The viewer is read-only and never launches the game. Old reports show offline.
+The sandbox has no supported live native-to-Lua readback, so the UI does not
+infer a connected channel from the presence of `ConsoleExec`. The addon-list
+and panel title are always **AzerothSurvivorsSpeedGear**; controls retain all
+fourteen game languages.
 
 The launcher confirms actual speed using a complete one-second observation window
 after the next integer-second boundary (usually 1–2 seconds). This display delay

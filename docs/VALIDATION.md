@@ -1,5 +1,25 @@
 # Validation — 2026-10-30
 
+## Version 0.4.0 validation scope
+
+This version is built and tested only on the remote GitHub Windows runner.
+The developer's local computer is used for source editing and installation of
+the remotely produced package; no local build, probe, test host or game/UI test
+is authorized or performed for this version. Real-game acceptance is not covered
+by the CI fixtures.
+
+New regression sources exercise a deliberately blocked original stdout pipe,
+complete normal stderr forwarding, bounded queue overload and delivery of the
+latest command. Command-gate tests cover validated console health, its 2.5s
+expiry, recovery through a matching query, stale/old-sequence refusal and
+adaptive fallback polling (30 scans in a modeled 30 healthy seconds instead of
+300). Native status tests cover atomic reports and refusal of unrelated or
+hard-linked destinations. PowerShell status fixtures cover schema/type bounds,
+freshness, missing or invalid reports and backend configuration labels. Lua
+fixtures distinguish sending attempts from native receipts and verify the fixed
+project title across fourteen language catalogs. Execution results are supplied
+by the corresponding GitHub Actions run, not inferred from source inspection.
+
 ## Version 0.3.0 switching and clock stability
 
 The old DLL reproduced a multimedia-timer resolution regression: an original

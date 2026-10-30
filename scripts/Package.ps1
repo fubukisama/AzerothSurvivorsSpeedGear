@@ -2,7 +2,7 @@
 param([string]$Configuration = 'Release')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$version = '0.3.0'
+$version = '0.4.0'
 $package = Join-Path $root ('dist\AZSSpeedGear-' + $version + '-Windows-x64')
 if (Test-Path -LiteralPath $package) { throw 'Package folder already exists; use a new clean output directory.' }
 foreach ($directory in @('AddOns','Native','scripts','docs','licenses')) {
@@ -11,7 +11,7 @@ foreach ($directory in @('AddOns','Native','scripts','docs','licenses')) {
 Copy-Item -LiteralPath (Join-Path $root 'AddOns\AZSSpeedGear') -Destination (Join-Path $package 'AddOns\AZSSpeedGear') -Recurse
 Copy-Item -LiteralPath (Join-Path $root "build\$Configuration\dwmapi.dll") -Destination (Join-Path $package 'Native\dwmapi.dll')
 Copy-Item -LiteralPath (Join-Path $root "build\$Configuration\AZSSpeedGearProbe.exe") -Destination (Join-Path $package 'Native\AZSSpeedGearProbe.exe')
-foreach ($file in @('Install.ps1','Uninstall.ps1')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $package "scripts\$file") }
+foreach ($file in @('Install.ps1','Uninstall.ps1','Status.ps1')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $package "scripts\$file") }
 foreach ($file in @('README.md','README.zh-CN.md','LICENSE','THIRD_PARTY_NOTICES.md')) { Copy-Item -LiteralPath (Join-Path $root $file) -Destination (Join-Path $package $file) }
 Copy-Item -LiteralPath (Join-Path $root 'docs\COMPATIBILITY.md') -Destination (Join-Path $package 'docs\COMPATIBILITY.md')
 if (Test-Path -LiteralPath (Join-Path $root 'docs\VALIDATION.md')) { Copy-Item -LiteralPath (Join-Path $root 'docs\VALIDATION.md') -Destination (Join-Path $package 'docs\VALIDATION.md') }

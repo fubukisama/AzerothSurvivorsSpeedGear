@@ -21,8 +21,17 @@ public:
             if(next->sequence<current_->sequence) return {};
             if(next->sequence==current_->sequence) {
                 // A synchronous query of the exact current CVar is a live pulse.
-                // Re-reading a file is never evidence that Lua is still running.
-                if(live_ && source==CommandSource::console && text==payload_) last_beat_=millis;
+                // Re-reading a file cannot keep the watchdog alive. Allow only
+                // its first exact, fresh echo to bridge a lost-console handoff:
+                // at 0.25x the game's save debounce can take four real seconds.
+                if(live_ && source==CommandSource::console && text==payload_) {
+                    last_beat_=millis;last_console_=millis;source_=source;
+                } else if(live_ && source==CommandSource::file && text==payload_ && !file_echo_seen_) {
+                    file_echo_seen_=true;
+                    if(source_==CommandSource::console && !console_healthy(millis)) {
+                        last_beat_=millis;source_=CommandSource::file;
+                    }
+                }
                 return {};
             }
         }
@@ -30,12 +39,27 @@ public:
             if(std::find(retired_.begin(),retired_.end(),next->session)!=retired_.end()) return {};
             if(current_) retired_[retired_index_++%retired_.size()]=current_->session;
         }
-        current_=next;payload_=text;last_beat_=millis;live_=true;
+        current_=next;payload_=text;last_beat_=millis;live_=true;source_=source;
+        file_echo_seen_=source==CommandSource::file;
+        if(source==CommandSource::console) last_console_=millis;
         return next->active?next->speed100:100u;
     }
     bool expire(std::uint64_t millis) {
         if(live_ && millis>=last_beat_ && millis-last_beat_>8000) {live_=false;return true;}
         return false;
+    }
+    bool console_healthy(std::uint64_t millis) const noexcept {
+        return live_ && source_==CommandSource::console && millis>=last_console_ && millis-last_console_<=2500;
+    }
+    const char* transport(std::uint64_t millis) const noexcept {
+        if(!current_) return "waiting";
+        if(!live_) return "stale";
+        if(source_==CommandSource::file) return "file";
+        return console_healthy(millis)?"console":"degraded";
+    }
+    std::optional<std::uint64_t> heartbeat_age(std::uint64_t millis) const noexcept {
+        if(!current_) return {};
+        return millis>=last_beat_?millis-last_beat_:0;
     }
 private:
     std::optional<Command> current_;
@@ -43,7 +67,23 @@ private:
     std::array<std::uint64_t,64> retired_{};
     std::size_t retired_index_=0;
     std::uint64_t last_beat_=0;
+    std::uint64_t last_console_=0;
+    CommandSource source_=CommandSource::file;
     bool live_=false;
+    bool file_echo_seen_=false;
+};
+
+// Keep watchdog checks frequent; throttle only the fallback file IO. A missing
+// console pulse returns to 100ms polling without waiting for the 8s watchdog.
+class FallbackPoller {
+public:
+    bool due(std::uint64_t millis,bool console_healthy) noexcept {
+        const std::uint64_t interval=console_healthy?1000:100;
+        if(!last_ || millis<*last_ || millis-*last_>=interval) {last_=millis;return true;}
+        return false;
+    }
+private:
+    std::optional<std::uint64_t> last_;
 };
 
 inline std::optional<std::string_view> console_command(std::string_view line) {

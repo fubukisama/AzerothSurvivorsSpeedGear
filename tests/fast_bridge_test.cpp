@@ -59,7 +59,7 @@ int wmain() {
     // Missing console output still has a functional file fallback.
     auto payload="SG1|456|"+std::to_string(++seq)+"|"+std::to_string(wall()/10000000-11644473600ull)+"|300|1";
     {std::ofstream out(config);out<<"[cvars]\nazsspeedgearcommand = \""<<payload<<"\"\n";}
-    Sleep(250);
+    Sleep(1250); // A recently healthy console permits at most one file scan/second.
     if(rate()<2.5) {++failures;std::cerr<<"FAIL file fallback\n";}
     std::cout<<"fast_bridge_failures="<<failures<<" maximum_delivery_ms="<<maximum<<"\n";
     return failures?1:0;

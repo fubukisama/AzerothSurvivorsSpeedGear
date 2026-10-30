@@ -49,6 +49,7 @@ function Gear.NewController(api)
     self.previousRun = nil;
     self.lastObservedRun = nil;
     self.bridgeReady = false;
+    self.sendStatus = "unavailable";
     self.writeFailed = false;
     self.initialized = false;
 
@@ -62,6 +63,7 @@ function Gear.NewController(api)
     if (type(api.register) == "function" and type(api.send) == "function") then
         local ok, result = pcall(api.register);
         self.bridgeReady = ok and result ~= false;
+        if (self.bridgeReady) then self.sendStatus = "file_only"; end
     end
 
     function self:RealTime()
@@ -88,6 +90,7 @@ function Gear.NewController(api)
         local ok, result = pcall(self.api.send, command);
         if (not ok or result == false) then
             self.bridgeReady = false;
+            self.sendStatus = "unavailable";
             self.writeFailed = true;
             self.active = false;
             self.speed100 = 100;
@@ -100,12 +103,18 @@ function Gear.NewController(api)
     end
 
     function self:Pulse(now)
+        self.lastPulse = now;
+        if (not self.bridgeReady) then self.sendStatus = "unavailable"; return false; end
+        local ok, result = false, false;
         if (type(self.api.pulse) == "function") then
             -- Querying the already-set CVar logs it synchronously without making
             -- the shared config dirty. Native receives this on its console pipe.
-            pcall(self.api.pulse);
-            self.lastPulse = now;
+            ok, result = pcall(self.api.pulse);
         end
+        -- A successful client call is an attempt, never a backend receipt.
+        if (ok and result ~= false) then self.sendStatus = "instant_attempt";
+        else self.sendStatus = "file_only"; end
+        return ok and result ~= false;
     end
 
     function self:Measure(now, run, sampled)
@@ -253,7 +262,10 @@ local controller = Gear.NewController({
     runTime = function() if (type(AZS_GetRunTime) == "function") then return AZS_GetRunTime(); end end,
     register = registerBridge,
     send = function(command) SetCVar(COMMAND_CVAR, command); return true; end,
-    pulse = function() if (type(ConsoleExec) == "function") then ConsoleExec(COMMAND_CVAR); end end
+    pulse = function()
+        if (type(ConsoleExec) == "function") then return ConsoleExec(COMMAND_CVAR); end
+        return false;
+    end
 });
 Gear.controller = controller;
 
@@ -261,6 +273,7 @@ local panel = nil;
 local launcher = nil;
 local statusLabel = nil;
 local measurementLabel = nil;
+local sendStatusLabel = nil;
 local customBox = nil;
 local noticeLabel = nil;
 local lastRendered = nil;
@@ -349,6 +362,12 @@ local function setShown(shown)
     if (panel) then if (db.show) then panel:Show(); else panel:Hide(); end end
 end
 
+local function sendingText()
+    if (controller.sendStatus == "instant_attempt") then return tr("send_instant_attempt"); end
+    if (controller.sendStatus == "file_only") then return tr("send_file_only"); end
+    return tr("send_unavailable");
+end
+
 local function render()
     updateLauncher();
     if (measurementMatchesTarget() and (noticeKey == "switching" or noticeKey == "stop_sent")) then
@@ -383,10 +402,12 @@ local function render()
     if (controller.measured) then
         measurement = string.format(tr("measured"), controller.measured);
     end
-    local signature = status .. measurement;
+    local sending = sendingText();
+    local signature = status .. measurement .. sending;
     if (signature ~= lastRendered) then
         statusLabel:SetText(status);
         measurementLabel:SetText(measurement);
+        if (sendStatusLabel) then sendStatusLabel:SetText(sending); end
         lastRendered = signature;
     end
 end
@@ -500,7 +521,7 @@ local function buildPanel()
     if (panel or type(CreateFrame) ~= "function" or not UIParent) then return; end
     panel = CreateFrame("Frame", "AZSSpeedGearPanel", UIParent);
     panel:SetWidth(560);
-    panel:SetHeight(348);
+    panel:SetHeight(384);
     panel:SetPoint("CENTER", UIParent, "CENTER", 0, 0);
     panel:SetFrameStrata("DIALOG");
     panel:SetMovable(true);
@@ -524,20 +545,21 @@ local function buildPanel()
     addButton(panel, "AZSSpeedGearClose", "close", 440, -10, 104, function() setShown(false); end);
     statusLabel = addText(panel, 12, 16, -50, "inactive");
     measurementLabel = addText(panel, 11, 16, -86, "measurement_wait");
+    sendStatusLabel = addText(panel, 11, 16, -122, "send_file_only");
     local presets = { 50, 100, 200, 300, 500 };
     local i = 1;
     while (i <= table.getn(presets)) do
         local selected = presets[i];
-        addButton(panel, "AZSSpeedGearPreset" .. i, "x" .. speedText(selected), 16 + (i - 1) * 104, -128, 96,
+        addButton(panel, "AZSSpeedGearPreset" .. i, "x" .. speedText(selected), 16 + (i - 1) * 104, -164, 96,
             function() requestSpeed(selected); end);
         i = i + 1;
     end
-    local customLabel = addText(panel, 11, 16, -180, "custom");
+    local customLabel = addText(panel, 11, 16, -216, "custom");
     customLabel:SetWidth(270);
     customBox = CreateFrame("EditBox", "AZSSpeedGearCustom", panel, "InputBoxTemplate");
     customBox:SetWidth(70);
     customBox:SetHeight(26);
-    customBox:SetPoint("TOPLEFT", panel, "TOPLEFT", 300, -172);
+    customBox:SetPoint("TOPLEFT", panel, "TOPLEFT", 300, -208);
     customBox:SetAutoFocus(false);
     customBox:SetMaxLetters(6);
     customBox:SetText("1");
@@ -549,10 +571,10 @@ local function buildPanel()
     end
     customBox:SetScript("OnEnterPressed", submitCustom);
     customBox:SetScript("OnEscapePressed", function() this:ClearFocus(); end);
-    addButton(panel, "AZSSpeedGearApply", "apply", 390, -172, 140, submitCustom);
-    addButton(panel, "AZSSpeedGearStop", "stop", 16, -224, 528, emergencyStop);
-    noticeLabel = addText(panel, 11, 16, -270, "hint");
-    addText(panel, 10, 16, -312, "commands");
+    addButton(panel, "AZSSpeedGearApply", "apply", 390, -208, 140, submitCustom);
+    addButton(panel, "AZSSpeedGearStop", "stop", 16, -260, 528, emergencyStop);
+    noticeLabel = addText(panel, 11, 16, -306, "hint");
+    addText(panel, 10, 16, -348, "commands");
     Gear.panel = panel;
 end
 
@@ -583,6 +605,7 @@ local function slash(message)
     if (not dbReady) then loadSettings(); end
     if (message == "show") then setShown(true);
     elseif (message == "hide") then setShown(false);
+    elseif (message == "status") then chat(sendingText()); chat(tr("status_help"));
     elseif (message == "stop" or message == "reset" or message == "1") then emergencyStop();
     elseif (message == "" or message == "toggle") then setShown(not savedDatabase().show);
     elseif (tonumber(message)) then requestSpeed(tonumber(message) * 100);

@@ -13,6 +13,10 @@ local function check(condition, message)
     if (not condition) then error(message); end
 end
 
+for code, catalog in pairs(AZSSpeedGearI18n.catalogs) do
+    check(catalog.title == "AzerothSurvivorsSpeedGear", "project title remains exact English repository name in " .. code);
+end
+
 local function fixture(available, pulseMode)
     local state = { now = 1800000000, run = 0, phase = "ready", solo = true, sent = {}, pulses = {} };
     local api = {
@@ -28,6 +32,7 @@ local function fixture(available, pulseMode)
         api.pulse = function()
             table.insert(state.pulses, state.now);
             if (pulseMode == "error") then error("console unavailable"); end
+            if (pulseMode == "false") then return false; end
             return true;
         end;
     end
@@ -52,6 +57,7 @@ end
 local state, controller = fixture();
 controller:Update();
 check(latest(state) == "SG1|1800000000321|1|1800000000|100|0", "initial inactive protocol");
+check(controller.sendStatus == "file_only", "CVar-only capability is not reported as backend confirmation");
 state.phase = "playing";
 controller:Update();
 check(controller.active and controller.speed100 == 100, "enter starts at x1");
@@ -79,6 +85,7 @@ local pulseQueries = table.getn(pulsed.pulses);
 pulsedController:RequestSpeed(500);
 check(table.getn(pulsed.sent) == pulseWrites + 1 and table.getn(pulsed.pulses) == pulseQueries + 1,
     "new request emits immediately and immediately queries its CVar");
+check(pulsedController.sendStatus == "instant_attempt", "successful pulse reports only an instant request attempt");
 pulseWrites = table.getn(pulsed.sent);
 pulseQueries = table.getn(pulsed.pulses);
 advanceFixture(pulsed, pulsedController, 4, 5);
@@ -94,10 +101,16 @@ failedPulse.phase = "playing";
 failedPulseController:Update();
 check(failedPulseController:RequestSpeed(200) and failedPulseController.bridgeReady and failedPulseController.active,
     "failed console pulse does not disable successful CVar fallback");
+check(failedPulseController.sendStatus == "file_only", "throwing pulse reports file fallback capability without a receipt");
 local writesBeforePulseFailure = table.getn(failedPulse.sent);
 advanceFixture(failedPulse, failedPulseController, 5, 2);
 check(table.getn(failedPulse.sent) == writesBeforePulseFailure + 1 and failedPulseController.bridgeReady,
     "console failure still permits subsequent five-second fallback writes");
+local rejectedPulse, rejectedPulseController = fixture(true, "false");
+rejectedPulse.phase = "playing";
+rejectedPulseController:Update();
+check(rejectedPulseController.sendStatus == "file_only" and rejectedPulseController.bridgeReady,
+    "explicitly rejected pulse leaves CVar fallback available");
 
 state.phase = "choosing";
 controller:Update();
@@ -153,6 +166,7 @@ local unavailable, noBridge = fixture(false);
 unavailable.phase = "playing";
 noBridge:Update();
 check(not noBridge.active and table.getn(unavailable.sent) == 0, "missing channel does not claim connection");
+check(noBridge.sendStatus == "unavailable", "missing request API is distinct from file fallback");
 check(not noBridge:RequestSpeed(200), "missing channel refuses commands");
 
 local unknown, noPhase = fixture();
@@ -240,6 +254,7 @@ bad.api.send = function() error("unavailable CVar"); end;
 broken.phase = "playing";
 bad:Update();
 check(not bad.active and not bad.bridgeReady and bad.speed100 == 100, "CVar errors fail inactive without propagating");
+check(bad.sendStatus == "unavailable", "failed CVar send cannot retain an instant-attempt capability");
 
 -- Exercise the production wiring with 1.12-style event/this globals and frames.
 local frames = {};
@@ -317,11 +332,22 @@ local function advanceUI(seconds, rate)
         step = step + 1;
     end
 end
+local function hasPanelText(text)
+    local index = 1;
+    while (index <= table.getn(AZSSpeedGear.panel.fontStrings)) do
+        if (AZSSpeedGear.panel.fontStrings[index].text == text) then return true; end
+        index = index + 1;
+    end
+    return false;
+end
 fire("ADDON_LOADED", "AZSSpeedGear");
 check(not AZSSpeedGear.panel.shown, "saved hidden panel restored");
 check(AZSSpeedGear.panel.x == 35 and AZSSpeedGear.panel.y == -40, "saved position restored");
 fire("PLAYER_ENTERING_WORLD");
 check(AZSSpeedGear.controller.active and AZSSpeedGear.controller.speed100 == 100, "world entry starts at x1");
+check(AZSSpeedGear.controller.sendStatus == "instant_attempt" and hasPanelText(AZSSpeedGearI18n.Text("send_instant_attempt")),
+    "production nil-returning ConsoleExec is displayed as an attempt rather than native acknowledgement");
+check(hasPanelText("AzerothSurvivorsSpeedGear"), "panel title uses exact English project name");
 SlashCmdList.AZSSPEEDGEAR("2");
 check(AZSSpeedGear.controller.speed100 == 200, "slash speed request reaches CVar bridge");
 SlashCmdList.AZSSPEEDGEAR("hide");
@@ -639,5 +665,33 @@ local writesWithoutConsole = table.getn(writes);
 advanceUI(5, 5);
 check(AZSSpeedGear.controller.bridgeReady and AZSSpeedGear.controller.active and table.getn(writes) == writesWithoutConsole + 1,
     "missing ConsoleExec leaves the real production adapter's CVar fallback working");
+check(AZSSpeedGear.controller.sendStatus == "file_only" and hasPanelText(AZSSpeedGearI18n.Text("send_file_only")),
+    "missing ConsoleExec refreshes sender capability while the panel is hidden");
+ConsoleExec = function() return false; end;
+advanceUI(1, 5);
+check(AZSSpeedGear.controller.sendStatus == "file_only" and AZSSpeedGear.controller.bridgeReady,
+    "production rejected ConsoleExec result preserves honest fallback state");
+ConsoleExec = function() error("console call failed"); end;
+advanceUI(1, 5);
+check(AZSSpeedGear.controller.sendStatus == "file_only" and AZSSpeedGear.controller.bridgeReady,
+    "production throwing ConsoleExec result preserves fallback state");
+ConsoleExec = function(command) table.insert(queries, command); end;
+advanceUI(1, 5);
+check(AZSSpeedGear.controller.sendStatus == "instant_attempt" and hasPanelText(AZSSpeedGearI18n.Text("send_instant_attempt")),
+    "successful later pulse refreshes sender capability without claiming backend connection");
+AZSSpeedGearNativeLocale = "ja";
+advanceUI(1, 5);
+check(hasPanelText(AZSSpeedGearI18n.catalogs.ja.send_instant_attempt) and hasPanelText("AzerothSurvivorsSpeedGear"),
+    "language change translates sender capability and keeps English project title");
+local statusMessages = {};
+DEFAULT_CHAT_FRAME = { AddMessage = function(self, text) table.insert(statusMessages, text); end };
+local beforeStatusWrites = table.getn(writes);
+local beforeStatusSpeed = AZSSpeedGear.controller.speed100;
+SlashCmdList.AZSSPEEDGEAR("status");
+check(table.getn(statusMessages) == 2 and string.find(statusMessages[1], AZSSpeedGearI18n.Text("send_instant_attempt"), 1, true) ~= nil
+    and string.find(statusMessages[2], "AZSSpeedGear-status.json", 1, true) ~= nil,
+    "status command gives sender capability and the actual native diagnostic filename");
+check(table.getn(writes) == beforeStatusWrites and AZSSpeedGear.controller.speed100 == beforeStatusSpeed,
+    "status inspection does not emit speed requests or alter the selected speed");
 
 print("AZSSpeedGear addon state and protocol: " .. checks .. " checks passed");
