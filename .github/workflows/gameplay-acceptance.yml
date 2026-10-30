@@ -1,0 +1,45 @@
+name: Disposable official game acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: disposable-official-game-acceptance
+  cancel-in-progress: false
+
+jobs:
+  gameplay:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build only this project's native runtime and structural probe
+        shell: pwsh
+        run: |
+          cmake -S . -B build -A x64 -DBUILD_TESTING=OFF
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build --config Release --target AZSSpeedGear AZSSpeedGearProbe --parallel 2
+          exit $LASTEXITCODE
+      - name: Package this exact source revision
+        shell: pwsh
+        run: |
+          $package = ./scripts/Package.ps1 | ConvertFrom-Json
+          "AZSG_ACCEPTANCE_PACKAGE=$($package.Package)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Run ephemeral official game with software rendering
+        shell: pwsh
+        run: ./tools/remote_game_acceptance.ps1 -PackagePath $env:AZSG_ACCEPTANCE_PACKAGE -OutputPath acceptance/report.json
+      - name: Retain only our bounded numerical report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-game-numerical-report
+          path: acceptance/report.json
+          if-no-files-found: warn
+          retention-days: 7
+      # Never upload/cache a game EXE, RAR, MPQ, screenshot, save or raw game log.
