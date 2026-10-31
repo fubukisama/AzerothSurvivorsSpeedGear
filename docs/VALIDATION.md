@@ -26,6 +26,12 @@ matched their measurement state; native 2x and restored 1x records were retained
 The game exited normally. This is real runtime text/visibility evidence, not a
 pixel-screenshot or a new movement/skill scaling certification.
 
+Remote [run 41186379194](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41186379194)
+passed all 26 CTests, including the new launcher cases, existing false-confirmation
+regressions, fourteen-locale checks and hover-state cleanup. The updater/installer
+and parser suites also passed. Measurement-event assertions observe actual
+transitions rather than assuming a fixed second lies in a retained window.
+
 ## Version 0.7.1 queued modifier capture
 
 The production-UI regression failed on the previous recorder in remote
