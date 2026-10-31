@@ -7,6 +7,9 @@ local seq, frames, actions = 0, 0, 0;
 local direction, before, after, accepted = 0, 100, 100, 0;
 local instance = math.floor(time() * 1000 + math.random(1, 999));
 local initialized, wrapped = false, false;
+local captureWrapper;
+local captureEvents = 0;
+local captureKey, captureCtrl, captureShift, captureAlt = "none", "none", "none", "none";
 local emit;
 local function safe(fn)
     if (type(fn) ~= "function") then return nil; end
@@ -20,6 +23,12 @@ end
 local function token(value)
     if (type(value) ~= "string" or value == "") then return "none"; end
     return string.sub(string.gsub(value, "[^A-Za-z0-9_-]", "_"), 1, 64);
+end
+local function rawModifier(fn)
+    if (type(fn) ~= "function") then return "missing"; end
+    local ok, value = pcall(fn);
+    if (not ok) then return "error"; end
+    return token(type(value) .. "_" .. tostring(value));
 end
 local function binding(key)
     local ok, value = pcall(GetBindingAction, key);
@@ -52,6 +61,22 @@ local function install()
         end;
         wrapped = true;
     end
+    -- Observe only the production recorder that is already active. Never add a
+    -- keyboard listener outside capture or replace its modifier calculation.
+    local panel = AZSSpeedGear and AZSSpeedGear.panel;
+    local original = panel and panel:GetScript("OnKeyDown");
+    if (original and original ~= captureWrapper) then
+        captureWrapper = function()
+            captureEvents = captureEvents + 1;
+            captureKey = token(arg1);
+            captureCtrl = rawModifier(IsControlKeyDown);
+            captureShift = rawModifier(IsShiftKeyDown);
+            captureAlt = rawModifier(IsAltKeyDown);
+            original();
+            emit();
+        end;
+        panel:SetScript("OnKeyDown", captureWrapper);
+    end
 end
 emit = function()
     if (not initialized or not AZSSpeedGear or not AZSSpeedGear.controller) then return; end
@@ -68,7 +93,9 @@ emit = function()
         .. "|" .. frames .. "|" .. string.format("%.6f", type(run.t) == "number" and run.t or -1)
         .. "|" .. shown(ChatFrameEditBox) .. "|" .. shown(GameMenuFrame)
         .. "|" .. center(gear.launcher) .. "|" .. center(AZSSpeedGearHotkeyDown) .. "|" .. center(AZSSpeedGearHotkeyUp)
-        .. "|" .. center(AZSSpeedGearClose) .. "|" .. center(AZSSpeedGearStop);
+        .. "|" .. center(AZSSpeedGearClose) .. "|" .. center(AZSSpeedGearStop)
+        .. "|" .. captureKey .. "|" .. captureCtrl .. "|" .. captureShift .. "|" .. captureAlt
+        .. "|" .. rawModifier(IsControlKeyDown) .. "|" .. captureEvents;
     SetCVar(cvar, payload); ConsoleExec(cvar);
 end;
 frame:RegisterEvent("PLAYER_ENTERING_WORLD");

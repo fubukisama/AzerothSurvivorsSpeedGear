@@ -29,11 +29,12 @@ public static class AZSGHotkeyMouse {
         $match = [regex]::Match($Row.Payload, '^(AZSGH1\|[A-Za-z0-9_.|_-]{1,1800})(?:[^A-Za-z0-9_.|_-]|$)')
         if (-not $match.Success) { return $null }
         $p = $match.Groups[1].Value.Split('|')
-        if ($p.Count -ne 35) { return $null }
+        if ($p.Count -ne 41) { return $null }
         try {
             $r = [ordered]@{ fileTime=[long]$Row.FileTime; seq=[long]$p[1]; instance=[long]$p[2]; phase=$p[3]; desired=[int]$p[4]; speed=[int]$p[5]; guard=[int]$p[6]; active=[int]$p[7]; down=$p[8]; up=$p[9]; q=$p[10]; e=$p[11]; r=$p[12]; ctrlT=$p[13]; capture=[int]$p[14]; panel=[int]$p[15]; actions=[int]$p[16]; direction=[int]$p[17]; before=[int]$p[18]; after=[int]$p[19]; accepted=[int]$p[20]; frames=[int]$p[21]; rawT=[double]::Parse($p[22],[Globalization.CultureInfo]::InvariantCulture); chat=[int]$p[23]; menu=[int]$p[24] }
             $names = @('launcher','downButton','upButton','closeButton','stopButton')
             for ($i=0; $i -lt 5; $i++) { $r[$names[$i]] = @([double]::Parse($p[25+$i*2],[Globalization.CultureInfo]::InvariantCulture), [double]::Parse($p[26+$i*2],[Globalization.CultureInfo]::InvariantCulture)) }
+            $r.captureKey=$p[35]; $r.captureCtrl=$p[36]; $r.captureShift=$p[37]; $r.captureAlt=$p[38]; $r.currentCtrl=$p[39]; $r.captureEvents=[int]$p[40]
             return [pscustomobject]$r
         } catch { return $null }
     }
