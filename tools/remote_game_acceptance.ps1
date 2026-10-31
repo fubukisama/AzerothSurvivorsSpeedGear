@@ -401,17 +401,28 @@ function Expand-OnlyOfficialAssets([string]$Destination) {
     return Join-Path $Destination $assetRoot
 }
 
-# Callbacks never publish raw game logs. Only our short numeric protocol enters
-# the queue; GPU errors are reduced to flags. This process is not time-hooked.
+# Callbacks publish only our numeric protocol and fixed startup categories by
+# default. A private diagnostic run can opt into four bounded, redacted panic
+# lines; whole logs are never retained. This process is not time-hooked.
 $hostSource = @'
 using System;
 using System.Diagnostics;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 public sealed class AZSGRemoteRow { public long FileTime; public string Payload; }
 public sealed class AZSGRemoteGame : IDisposable {
   public readonly ConcurrentQueue<AZSGRemoteRow> Rows = new ConcurrentQueue<AZSGRemoteRow>();
   public Process Child; public bool GpuFailure, Panicked, SoftwareObserved; public int Dropped;
+  readonly bool capturePanic=Environment.GetEnvironmentVariable("AZSG_CAPTURE_PANIC")=="1";
+  readonly object panicLock=new object();
+  readonly List<string> panicExcerpt=new List<string>();
+  readonly ConcurrentDictionary<string,byte> startupCategories=new ConcurrentDictionary<string,byte>();
+  bool panicStarted; int panicRemaining;
+  public bool PanicCaptureEnabled { get { return capturePanic; } }
+  public string[] PanicExcerpt { get { lock(panicLock) { return panicExcerpt.ToArray(); } } }
+  public string[] StartupCategories { get { var values=new List<string>(startupCategories.Keys); values.Sort(StringComparer.Ordinal); return values.ToArray(); } }
   [DllImport("kernel32.dll")] public static extern void GetSystemTimePreciseAsFileTime(out long time);
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window,int command);
@@ -424,11 +435,42 @@ public sealed class AZSGRemoteGame : IDisposable {
   [StructLayout(LayoutKind.Explicit)] struct Union { [FieldOffset(0)] public Keyboard Key; [FieldOffset(0)] public Mouse Mouse; }
   [StructLayout(LayoutKind.Sequential)] struct Input { public uint Type; public Union Value; }
   public static long Wall() { long value; GetSystemTimePreciseAsFileTime(out value); return value; }
+  static bool Has(string value,string needle) { return value.IndexOf(needle,StringComparison.OrdinalIgnoreCase)>=0; }
+  static string RedactedLine(string value) {
+    if(value.Length>16384) value=value.Substring(0,16384);
+    value=Regex.Replace(value,@"\x1B\[[0-?]*[ -/]*[@-~]","");
+    value=Regex.Replace(value,@"(?i)\b[a-z][a-z0-9+.-]*://[^\s""'<>]+","<url>");
+    value=Regex.Replace(value,@"(?i)\b(?:[a-z0-9_]*(?:token|secret|password)|authorization|proxy-authorization|auth|api[_-]?key|sig)\s*[:=]\s*(?:(?:bearer|basic|token)\s+)?(?:""[^""]*""|'[^']*'|[^\s,;]+)","<credential>");
+    value=Regex.Replace(value,@"(?i)\b(?:gh[pousr]_[a-z0-9_]+|github_pat_[a-z0-9_]+|bearer\s+[^\s,;]+)\b","<credential>");
+    value=Regex.Replace(value,@"(?i)[""'][a-z]:[\\/][^""'\r\n]*[""']","<path>");
+    value=Regex.Replace(value,@"(?i)\b[a-z]:[\\/][^\s""'<>]*","<path>");
+    value=Regex.Replace(value,@"/(?:home|Users|tmp|runner|__w|a|opt|usr|rustc)/[^\s""'<>]*","<path>");
+    value=Regex.Replace(value,@"[\x00-\x08\x0B-\x1F\x7F]","");
+    value=Regex.Replace(value,@"\s+"," ").Trim();
+    return value.Length>400?value.Substring(0,400):value;
+  }
+  void ObserveStartup(string text,bool panic) {
+    if(Has(text,"Unable to find a GPU") || Has(text,"no suitable adapter")) startupCategories.TryAdd("adapter_unavailable",0);
+    if(Has(text,"RequestDeviceError") || Has(text,"failed to create wgpu")) startupCategories.TryAdd("device_request_failed",0);
+    if(Has(text,"DeviceLost") || Has(text,"device lost")) startupCategories.TryAdd("device_lost",0);
+    if(Has(text,"MissingFeatures") || Has(text,"UnsupportedFeatures") || (Has(text,"features") && (Has(text,"not support") || Has(text,"not enabled")))) startupCategories.TryAdd("gpu_features_unavailable",0);
+    if(Has(text,"shader") && (Has(text,"error") || Has(text,"failed") || Has(text,"validation"))) startupCategories.TryAdd("shader_validation_failed",0);
+    if((Has(text,"DX12") || Has(text,"D3D12")) && (Has(text,"error") || Has(text,"failed"))) startupCategories.TryAdd("dx12_runtime_error",0);
+    if(Has(text,"MPQ") && (Has(text,"failed") || Has(text,"missing") || Has(text,"unable") || Has(text,"not found"))) startupCategories.TryAdd("asset_open_failed",0);
+    if(Has(text,"DLL") && (Has(text,"missing") || Has(text,"not found") || Has(text,"could not"))) startupCategories.TryAdd("native_dependency_missing",0);
+    if(!capturePanic) return;
+    lock(panicLock) {
+      if(panic && !panicStarted) { panicStarted=true; panicRemaining=4; }
+      if(panicRemaining>0) { panicExcerpt.Add(RedactedLine(text)); --panicRemaining; }
+    }
+  }
   void Line(object sender,DataReceivedEventArgs e) {
     var text=e.Data; if(text==null) return;
     if(text.IndexOf("Microsoft Basic Render Driver",StringComparison.OrdinalIgnoreCase)>=0 || text.IndexOf("device_type: Cpu",StringComparison.OrdinalIgnoreCase)>=0) SoftwareObserved=true;
     if(text.IndexOf("Unable to find a GPU",StringComparison.OrdinalIgnoreCase)>=0 || text.IndexOf("failed to create wgpu",StringComparison.OrdinalIgnoreCase)>=0 || text.IndexOf("RequestDeviceError",StringComparison.OrdinalIgnoreCase)>=0) GpuFailure=true;
-    if(text.IndexOf("panicked at",StringComparison.Ordinal)>=0) Panicked=true;
+    var panic=text.IndexOf("panicked at",StringComparison.Ordinal)>=0;
+    if(panic) Panicked=true;
+    ObserveStartup(text,panic);
     var at=text.IndexOf("AZSGT1|",StringComparison.Ordinal); if(at<0 || text.Length-at>2048) return;
     if(Rows.Count>=8192) { System.Threading.Interlocked.Increment(ref Dropped); return; }
     Rows.Enqueue(new AZSGRemoteRow {FileTime=Wall(),Payload=text.Substring(at)});
@@ -515,7 +557,13 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
     try {
         $session.Start($info)
         while (([AZSGRemoteGame]::Wall() - $start) / 1e7 -lt 150) {
-            if ($session.Child.HasExited) { $reason = if ($session.GpuFailure) { 'blocked_renderer' } else { 'blocked_game_exited' }; break }
+            if ($session.Child.HasExited) {
+                # Complete already-exited process output callbacks before taking
+                # the bounded diagnostic snapshot, including lines after panic.
+                $session.Child.WaitForExit()
+                $reason = if ($session.GpuFailure) { 'blocked_renderer' } else { 'blocked_game_exited' }
+                break
+            }
             $row = $null
             while ($session.Rows.TryDequeue([ref]$row)) {
                 $sample = Read-Telemetry $row
@@ -559,7 +607,9 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
         }
         return [pscustomobject]@{ mode = $Mode; status = $reason; softwareAdapterObserved = $session.SoftwareObserved
             processExitCode = $(if ($session.Child.HasExited) { $session.Child.ExitCode } else { $null })
-            gpuFailure = $session.GpuFailure; panicked = $session.Panicked; droppedTelemetry = $session.Dropped; samples = $samples.ToArray() }
+            gpuFailure = $session.GpuFailure; panicked = $session.Panicked
+            startupCategories = @($session.StartupCategories); panicCaptureEnabled = $session.PanicCaptureEnabled; panicExcerpt = @($session.PanicExcerpt)
+            droppedTelemetry = $session.Dropped; samples = $samples.ToArray() }
     } finally {
         $session.Dispose()
         # Windows Known Folder APIs may ignore APPDATA environment overrides.
