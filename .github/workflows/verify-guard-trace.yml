@@ -1,0 +1,62 @@
+name: Replay frame guard fallback evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      trace_run_id:
+        description: Existing official-game-numerical-report workflow run ID
+        required: true
+        default: '41175749484'
+        type: string
+      runtime_source_sha:
+        description: Exact source SHA of the runtime that generated the trace
+        required: true
+        default: '51e089f2d74b3c971c75b5a6cde15e2e2e5145e7'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TRACE_RUN_ID: ${{ inputs.trace_run_id }}
+      RUNTIME_SOURCE_SHA: ${{ inputs.runtime_source_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate fixed-format provenance inputs
+        shell: bash
+        run: |
+          [[ "$TRACE_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]] || exit 1
+          [[ "$RUNTIME_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+      - name: Test the synthetic verifier fixtures remotely
+        run: python -m unittest discover -s tests -p frame_guard_trace_test.py -v
+      - name: Download only the existing numerical report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$TRACE_RUN_ID" --repo "$GITHUB_REPOSITORY" -n official-game-numerical-report -D trace
+      - name: Recompute the narrow fallback proof without executing the game
+        run: >-
+          python tools/verify_frame_guard_trace.py
+          --report trace/report.json
+          --runtime-source-sha "$RUNTIME_SOURCE_SHA"
+          --verifier-source-sha "$GITHUB_SHA"
+          --trace-run-id "$TRACE_RUN_ID"
+          --workflow-repository "$GITHUB_REPOSITORY"
+          --output verified/guard-verdict.json
+      - name: Upload only the separate fallback verdict
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frame-guard-fallback-verdict
+          path: verified/guard-verdict.json
+          if-no-files-found: warn
+          retention-days: 14
