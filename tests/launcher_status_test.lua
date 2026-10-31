@@ -105,6 +105,15 @@ local function advance(seconds, actualRate, clientRate, publicationOffset)
         update(); frame = frame + 1;
     end
 end
+local function advanceUntil(seconds, actualRate, clientRate, publicationOffset, condition)
+    local frame = 1;
+    while (frame <= seconds * 60) do
+        advance(1 / 60, actualRate, clientRate, publicationOffset);
+        if (condition()) then return true; end
+        frame = frame + 1;
+    end
+    return false;
+end
 local function request(value) SlashCmdList.AZSSPEEDGEAR(value); end
 local function caption() return AZSSpeedGearI18n.Text("launcher"); end
 local function text() return AZSSpeedGear.launcher.text; end
@@ -151,8 +160,13 @@ check(tooltipHas(string.format(AZSSpeedGearI18n.Text("measured"), controller.mea
     "hovered tooltip follows independently observed progress without equating it to a native receipt");
 
 request("2");
-advance(8, 1, 1, 0.01);
-check(controller.measurementMismatch and controller.confirmedSpeed100 == nil,
+-- A definite mismatch completes and restarts its measurement window. Observe
+-- the actual first mismatch event rather than sampling an arbitrary endpoint
+-- that may already be collecting the next uncertain window.
+local mismatchObserved = advanceUntil(12, 1, 1, 0.01, function()
+    return controller.measurementMismatch;
+end);
+check(mismatchObserved and controller.confirmedSpeed100 == nil,
     "independent actual 1x against requested 2x is a definite mismatch");
 check(text() == target("2") .. " !", "mismatch retains the target number with an explicit warning marker");
 check(tooltipHas(AZSSpeedGearI18n.Text("below_target"))
@@ -192,17 +206,22 @@ pending("2", "pending numeric target follows a game-language change");
 check(tooltipHas(string.format(AZSSpeedGearI18n.Text("target_wait"), "2")),
     "a hovered pending explanation follows the game-language change");
 
--- Aligned, independently advanced raw publications can still reach the
--- unadorned success caption through the actual measurement state machine.
+-- Independently timed publications just before each integer wall boundary can
+-- establish confirmation. Stop at the actual event, without assuming a fixed
+-- endpoint falls in the controller's confirmation-retention interval.
 request("2");
-advance(8, 2, 2, 0);
-check(controller.confirmedSpeed100 == 200 and text() == caption() .. " ×2",
+local confirmedTwo = advanceUntil(12, 2, 2, -0.001, function()
+    return controller.confirmedSpeed100 == 200;
+end);
+check(confirmedTwo and text() == caption() .. " ×2",
     "bounded confirmed measurements retain the unadorned numeric suffix");
 check(tooltipHas(string.format(AZSSpeedGearI18n.Text("target_measured"), "2")),
     "only measured confirmation changes the hover explanation to confirmed");
 request("0.5"); pending("0.5", "fractional pending values use compact decimal text");
-advance(8, 0.5, 0.5, 0);
-check(controller.confirmedSpeed100 == 50 and text() == caption() .. " ×0.5",
+local confirmedHalf = advanceUntil(12, 0.5, 0.5, -0.001, function()
+    return controller.confirmedSpeed100 == 50;
+end);
+check(confirmedHalf and text() == caption() .. " ×0.5",
     "fractional confirmed measurements remove the pending marker");
 hover("OnLeave");
 check(not GameTooltip.shown and not AZSSpeedGear.launcher.speedGearHovered,

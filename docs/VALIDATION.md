@@ -18,6 +18,14 @@ The estimator and its false-confirmation protections are unchanged: conservative
 or interrupted observations may remain unconfirmed, but the requested number
 stays visible without being represented as a measured result.
 
+The real-game [launcher report](evidence/launcher0131.json) from runtime source
+`d2fc927` passed all six criteria on game 0.131.0. Actual visible button `GetText`
+was `Target ×1 …`, then `Target ×2 …` during a physical E press, then
+`Target ×1 …` after the real guard restored the request. All ten active samples
+matched their measurement state; native 2x and restored 1x records were retained.
+The game exited normally. This is real runtime text/visibility evidence, not a
+pixel-screenshot or a new movement/skill scaling certification.
+
 ## Version 0.7.1 queued modifier capture
 
 The production-UI regression failed on the previous recorder in remote
