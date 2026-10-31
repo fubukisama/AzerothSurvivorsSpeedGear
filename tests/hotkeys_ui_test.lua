@@ -417,9 +417,11 @@ check(downButton.width == narrowKeyWidth, "resetting Q/E shrinks the button agai
 -- must copy that face/size and invalidate the old metric, not assume the default.
 downButton:GetFontString():SetFont("fixture-alternate", 12);
 click("AZSSpeedGearHotkeyReset");
+SlashCmdList.AZSSPEEDGEAR("show");
 checkPanelLayout("native button font override");
 downButton:GetFontString():SetFont("fixture-font", 11);
 click("AZSSpeedGearHotkeyReset");
+SlashCmdList.AZSSPEEDGEAR("show");
 UIParent:SetWidth(320); SlashCmdList.AZSSPEEDGEAR("show");
 checkPanelLayout("narrow viewport");
 UIParent:SetWidth(960); SlashCmdList.AZSSPEEDGEAR("show");

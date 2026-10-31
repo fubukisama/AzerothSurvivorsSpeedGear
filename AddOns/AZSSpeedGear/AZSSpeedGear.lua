@@ -968,7 +968,10 @@ end
 
 layoutPanel = function()
     if (not panelWidgets or panel.speedGearDragging) then return; end
-    if (widgetValue(panel, "IsShown") == false) then return; end
+    if (type(panel.IsShown) == "function") then
+        local visible = widgetValue(panel, "IsShown");
+        if (visible ~= true and visible ~= 1) then return; end
+    end
     layoutState.dirty = false;
     local w = panelWidgets;
     w.details:SetText((layoutState.detailsOpen and "- " or "+ ") .. tr("details"));
