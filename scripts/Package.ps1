@@ -36,7 +36,7 @@ if (Test-Path -LiteralPath (Join-Path $root 'docs\VALIDATION.md')) { Copy-Item -
 Copy-Item -LiteralPath (Join-Path $root 'docs\SPEEDINVESTIGATION.md') -Destination (Join-Path $package 'docs\SPEEDINVESTIGATION.md')
 New-Item -ItemType Directory -Path (Join-Path $package 'docs\evidence') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'docs\evidence\frameguard0131.json') -Destination (Join-Path $package 'docs\evidence\frameguard0131.json')
-foreach ($name in @('hotkeys0131raw.json', 'hotkeys0131.json', 'launcher0131.json', 'confirmation0131.json')) {
+foreach ($name in @('hotkeys0131raw.json', 'hotkeys0131.json', 'launcher0131.json', 'confirmation0131.json', 'layout0131.json')) {
     Copy-Item -LiteralPath (Join-Path $root ('docs\evidence\' + $name)) -Destination (Join-Path $package ('docs\evidence\' + $name))
 }
 Copy-Item -LiteralPath (Join-Path $root 'third_party\azs-speed-controller\LICENSE') -Destination (Join-Path $package 'licenses\AZS-Speed-Controller-MIT.txt')
