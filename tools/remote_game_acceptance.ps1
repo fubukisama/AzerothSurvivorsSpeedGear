@@ -23,6 +23,7 @@ $report = [ordered]@{ schema = 1; product = 'AzerothSurvivorsSpeedGear'; status 
     checkedUtc = [DateTime]::UtcNow.ToString('o'); sourceCommit = $null; ciRunId = $env:GITHUB_RUN_ID; workflowRepository = $env:GITHUB_REPOSITORY
     gameVersion = $null; gameSha256 = $null; gameBytes = $null; officialAssetsSha256 = $null; candidateDllSha256 = $null; pluginVersion = $null
     gameSource = 'official_download'; privateBundleSha256 = $null; privateBundleBytes = $null
+    runtimeProfile = 'system'; runtimeFiles = @()
     renderingRequested = 'DX12 software fallback / Microsoft Basic Render Driver'; runs = @(); criteria = @(); metrics = $null; missingEvidence = @()
     scope = 'One official Windows build on a disposable software-rendered runner. No general gameplay or future-version certification.'
     clock = 'GetSystemTimePreciseAsFileTime in the unhooked parent process'
@@ -33,6 +34,33 @@ $exitCode = 2
 function Write-Text([string]$Path, [string]$Text) {
     New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
     [IO.File]::WriteAllText($Path, $Text, $script:utf8)
+}
+
+function Initialize-RemoteRuntime {
+    $script:runtimeDllSources = @()
+    if ([string]::IsNullOrWhiteSpace($env:AZSG_REMOTE_RUNTIME_DLL_DIR)) { return }
+    $directory = [IO.Path]::GetFullPath($env:AZSG_REMOTE_RUNTIME_DLL_DIR).TrimEnd('\')
+    if (-not $directory.StartsWith($script:temporaryRoot + '\', [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $directory -PathType Container)) { throw 'blocked_runtime_profile_path' }
+    $relative = $directory.Substring($script:temporaryRoot.Length + 1)
+    if (@($relative.Split('\') | Where-Object { $_ -eq '' -or $_ -eq '.' -or $_ -eq '..' -or $_ -match '[. ]$' }).Count) { throw 'blocked_runtime_profile_path' }
+    $cursor = Get-Item -LiteralPath $directory -Force
+    while (-not $cursor.FullName.TrimEnd('\').Equals($script:temporaryRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        if (($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $null -eq $cursor.Parent) { throw 'blocked_runtime_profile_link' }
+        $cursor = $cursor.Parent
+    }
+    if (($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'blocked_runtime_profile_link' }
+    foreach ($name in @('dxcompiler.dll', 'dxil.dll', 'd3d10warp.dll')) {
+        $path = Join-Path $directory $name
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'blocked_runtime_profile_file' }
+        $file = Get-Item -LiteralPath $path -Force
+        if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $file.Length -le 0) { throw 'blocked_runtime_profile_link' }
+        $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+        $script:runtimeDllSources += [pscustomobject]@{ name = $name; path = $file.FullName; sha256 = $hash }
+        $script:report.runtimeFiles += [pscustomobject]@{ name = $name; bytes = $file.Length; sha256 = $hash }
+    }
+    # These identify app-local staged files, not proof of module loading.
+    $script:report.runtimeProfile = 'updated_warp'
 }
 
 function Get-OfficialGame {
@@ -452,7 +480,8 @@ public sealed class AZSGRemoteGame : IDisposable {
   void ObserveStartup(string text,bool panic) {
     if(Has(text,"Unable to find a GPU") || Has(text,"no suitable adapter")) startupCategories.TryAdd("adapter_unavailable",0);
     if(Has(text,"RequestDeviceError") || Has(text,"failed to create wgpu")) startupCategories.TryAdd("device_request_failed",0);
-    if(Has(text,"DeviceLost") || Has(text,"device lost")) startupCategories.TryAdd("device_lost",0);
+    if(Has(text,"DeviceLost") || Has(text,"device lost") || Has(text,"device is lost")) startupCategories.TryAdd("device_lost",0);
+    if(Has(text,"Surface::present") && (Has(text,"Validation Error") || Has(text,"error"))) startupCategories.TryAdd("surface_present_validation_failed",0);
     if(Has(text,"MissingFeatures") || Has(text,"UnsupportedFeatures") || (Has(text,"features") && (Has(text,"not support") || Has(text,"not enabled")))) startupCategories.TryAdd("gpu_features_unavailable",0);
     if(Has(text,"shader") && (Has(text,"error") || Has(text,"failed") || Has(text,"validation"))) startupCategories.TryAdd("shader_validation_failed",0);
     if((Has(text,"DX12") || Has(text,"D3D12")) && (Has(text,"error") || Has(text,"failed"))) startupCategories.TryAdd("dx12_runtime_error",0);
@@ -526,6 +555,12 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
     foreach ($file in @(Get-ChildItem -LiteralPath $Assets -File)) { Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $data $file.Name) }
     $exe = Join-Path $GameRoot 'AzerothSurvivors.exe'
     Copy-Item -LiteralPath $OfficialExe -Destination $exe
+    foreach ($runtimeFile in $script:runtimeDllSources) {
+        $destination = [IO.Path]::GetFullPath((Join-Path $GameRoot $runtimeFile.name))
+        if (-not $destination.StartsWith($script:fixtureRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'blocked_runtime_profile_destination' }
+        Copy-Item -LiteralPath $runtimeFile.path -Destination $destination
+        if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash -ine $runtimeFile.sha256) { throw 'blocked_runtime_profile_copy' }
+    }
     $state = Join-Path $GameRoot 'benilla-config'
     $telemetry = Join-Path $state 'AddOns\AZSGAcceptance'
     Write-Text (Join-Path $telemetry 'AZSGAcceptance.toc') "## Interface: 11200`n## Title: AZSG remote acceptance`nMode.lua`nTelemetry.lua`n"
@@ -602,7 +637,13 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
                 }
             }
             if ($null -eq $firstPlayingAt -and ($now - $start) / 1e7 -gt 90) { break }
-            if (-not $inputOkay) { $reason = 'blocked_input_or_foreground'; break }
+            if (-not $inputOkay) {
+                if ($session.Child.HasExited) {
+                    $session.Child.WaitForExit()
+                    $reason = 'blocked_game_exited'
+                } else { $reason = 'blocked_input_or_foreground' }
+                break
+            }
             Start-Sleep -Milliseconds 50
         }
         return [pscustomobject]@{ mode = $Mode; status = $reason; softwareAdapterObserved = $session.SoftwareObserved
@@ -680,6 +721,7 @@ try {
         $sourceIdentity[0] -cnotmatch '^[a-f0-9]{40}$') { throw 'blocked_source_identity' }
     $report.sourceCommit = [string]$sourceIdentity[0]
     Add-Type -TypeDefinition $hostSource
+    Initialize-RemoteRuntime
     $report.candidateDllSha256 = (Get-FileHash -LiteralPath (Join-Path $package 'Native\dwmapi.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
     $packageToc = [IO.File]::ReadAllText((Join-Path $package 'AddOns\AZSSpeedGear\AZSSpeedGear.toc'), $utf8)
     $report.pluginVersion = [regex]::Match($packageToc, '(?m)^## Version: ([0-9]+\.[0-9]+\.[0-9]+)\r?$').Groups[1].Value
