@@ -34,6 +34,8 @@ foreach ($file in @('README.md','README.zh-CN.md','LICENSE','THIRD_PARTY_NOTICES
 Copy-Item -LiteralPath (Join-Path $root 'docs\COMPATIBILITY.md') -Destination (Join-Path $package 'docs\COMPATIBILITY.md')
 if (Test-Path -LiteralPath (Join-Path $root 'docs\VALIDATION.md')) { Copy-Item -LiteralPath (Join-Path $root 'docs\VALIDATION.md') -Destination (Join-Path $package 'docs\VALIDATION.md') }
 Copy-Item -LiteralPath (Join-Path $root 'docs\SPEEDINVESTIGATION.md') -Destination (Join-Path $package 'docs\SPEEDINVESTIGATION.md')
+New-Item -ItemType Directory -Path (Join-Path $package 'docs\evidence') -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $root 'docs\evidence\frameguard0131.json') -Destination (Join-Path $package 'docs\evidence\frameguard0131.json')
 Copy-Item -LiteralPath (Join-Path $root 'third_party\azs-speed-controller\LICENSE') -Destination (Join-Path $package 'licenses\AZS-Speed-Controller-MIT.txt')
 Copy-Item -LiteralPath (Join-Path $root 'third_party\minhook\LICENSE.txt') -Destination (Join-Path $package 'licenses\MinHook-BSD.txt')
 $manifest = foreach ($file in Get-ChildItem -LiteralPath $package -File -Recurse) {
