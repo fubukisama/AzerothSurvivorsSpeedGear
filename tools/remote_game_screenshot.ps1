@@ -55,7 +55,7 @@ try {
     $captureRoot = Join-Path $projectRoot 'acceptance'
     $output = [IO.Path]::GetFullPath($OutputPath)
     if (-not [IO.Path]::GetDirectoryName($output).Equals($captureRoot, [StringComparison]::OrdinalIgnoreCase) -or
-        [IO.Path]::GetFileName($output) -cnotmatch '^frame-(baseline|hooked)\.png$') { Stop-Capture 'invalid_output_path' }
+        [IO.Path]::GetFileName($output) -cnotmatch '^(?:frame-(?:baseline|hooked)|hotkeys-[12])\.png$') { Stop-Capture 'invalid_output_path' }
     if (Test-Path -LiteralPath $output) { Stop-Capture 'output_already_exists' }
     if (Test-Path -LiteralPath $captureRoot) { Assert-NoLinkedAncestor $captureRoot }
     else { New-Item -ItemType Directory -Path $captureRoot | Out-Null }
