@@ -1,5 +1,10 @@
 # AzerothSurvivorsSpeedGear
 
+Version 0.7.1 preserves Ctrl/Alt/Shift event order while recording a shortcut,
+including delayed key events whose native modifier query is already stale.
+An observed modifier release takes priority over that query. Ending or cancelling
+recording clears both temporary keyboard handlers and their modifier state.
+
 Version 0.7.0 adds configurable in-game speed hotkeys. **Q** steps down and **E**
 steps up through 0.25x, 0.5x, 1x, 2x, 3x, 5x and 10x. Endpoints hold their value;
 custom rates step to the nearest lower or higher preset. Click either hotkey

@@ -237,6 +237,12 @@ click("AZSSpeedGearHotkeyUp"); press("CTRL"); release("CTRL"); press("T");
 check(AZSSpeedGearDB.hotkeyUp == "T" and bindings.T == "AZSG_FASTER" and bindings["CTRL-T"] == nil,
     "a modifier released before the normal key is not retained in the chord");
 click("AZSSpeedGearHotkeyReset");
+modifiers.ctrl = 1;
+click("AZSSpeedGearHotkeyUp"); press("CTRL"); release("CTRL"); press("T");
+modifiers.ctrl = nil;
+check(AZSSpeedGearDB.hotkeyUp == "T" and bindings.T == "AZSG_FASTER" and bindings["CTRL-T"] == nil,
+    "an observed Ctrl release overrides a stale native query that still reports Ctrl held");
+click("AZSSpeedGearHotkeyReset");
 click("AZSSpeedGearHotkeyDown"); press("SHIFT"); press("ALT"); press("CTRL"); press("R");
 check(AZSSpeedGearDB.hotkeyDown == "ALT-CTRL-SHIFT-R" and bindings["ALT-CTRL-SHIFT-R"] == "AZSG_SLOWER",
     "queued Shift Alt and Ctrl events form a canonical combined chord with stale native queries");

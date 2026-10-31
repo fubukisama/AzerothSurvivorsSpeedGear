@@ -401,6 +401,7 @@ local lastNoticeText = nil;
 local keyManager = nil;
 local hotkeyDownButton, hotkeyUpButton, hotkeyHint;
 local captureAction = nil;
+local captureModifiers = nil;
 local hotkeyError = nil;
 local lastHotkeyText = nil;
 local customTyping = false;
@@ -484,9 +485,10 @@ local function refreshHotkeys()
 end
 
 local function stopHotkeyCapture()
-    captureAction = nil; hotkeyError = nil;
+    captureAction = nil; captureModifiers = nil; hotkeyError = nil;
     if (panel) then
         panel:SetScript("OnKeyDown", nil);
+        panel:SetScript("OnKeyUp", nil);
         if (type(panel.EnableKeyboard) == "function") then panel:EnableKeyboard(false); end
     end
     refreshHotkeys();
@@ -625,17 +627,39 @@ local function modifier(fn)
     return value == true or value == 1;
 end
 
+local CAPTURE_MODIFIERS = {
+    SHIFT = "shift", LSHIFT = "shift", RSHIFT = "shift",
+    CTRL = "ctrl", CONTROL = "ctrl", LCTRL = "ctrl", RCTRL = "ctrl",
+    ALT = "alt", LALT = "alt", RALT = "alt"
+};
+
+local function capturedModifier(name, query)
+    -- A delayed client can expose the final OS state while replaying earlier
+    -- key events. Prefer observed event order, including an observed release.
+    if (captureModifiers and captureModifiers[name] ~= nil) then return captureModifiers[name]; end
+    -- A modifier held before recording has no captured key-down event.
+    return modifier(query);
+end
+
+local function releaseCapturedModifier()
+    local name = CAPTURE_MODIFIERS[string.upper(arg1 or "")];
+    if (name and captureModifiers) then captureModifiers[name] = false; end
+end
+
 local function captureHotkey()
     local key = string.upper(arg1 or "");
     if (key == "ESCAPE") then stopHotkeyCapture(); return; end
-    if (key == "UNKNOWN" or key == "SHIFT" or key == "CTRL" or key == "CONTROL" or key == "ALT"
-        or key == "LSHIFT" or key == "RSHIFT" or key == "LCTRL" or key == "RCTRL"
-        or key == "LALT" or key == "RALT") then return; end
+    local name = CAPTURE_MODIFIERS[key];
+    if (name) then
+        if (captureModifiers) then captureModifiers[name] = true; end
+        return;
+    end
+    if (key == "UNKNOWN") then return; end
     if (key == "BACKSPACE") then key = "";
     else
-        if (modifier(IsShiftKeyDown)) then key = "SHIFT-" .. key; end
-        if (modifier(IsControlKeyDown)) then key = "CTRL-" .. key; end
-        if (modifier(IsAltKeyDown)) then key = "ALT-" .. key; end
+        if (capturedModifier("shift", IsShiftKeyDown)) then key = "SHIFT-" .. key; end
+        if (capturedModifier("ctrl", IsControlKeyDown)) then key = "CTRL-" .. key; end
+        if (capturedModifier("alt", IsAltKeyDown)) then key = "ALT-" .. key; end
     end
     local ok, reason = keyManager:SetKey(captureAction, key);
     if (ok) then stopHotkeyCapture();
@@ -652,7 +676,10 @@ local function beginHotkeyCapture(action)
     if (ChatFrameEditBox and type(ChatFrameEditBox.ClearFocus) == "function") then ChatFrameEditBox:ClearFocus(); end
     if (ChatFrame1EditBox and type(ChatFrame1EditBox.ClearFocus) == "function") then ChatFrame1EditBox:ClearFocus(); end
     captureAction = action;
-    panel:SetScript("OnKeyDown", captureHotkey); panel:EnableKeyboard(true);
+    captureModifiers = {};
+    panel:SetScript("OnKeyDown", captureHotkey);
+    panel:SetScript("OnKeyUp", releaseCapturedModifier);
+    panel:EnableKeyboard(true);
     refreshHotkeys();
 end
 
