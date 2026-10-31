@@ -25,6 +25,7 @@ $report = [ordered]@{ schema = 1; product = 'AzerothSurvivorsSpeedGear'; status 
     gameSource = 'official_download'; privateBundleSha256 = $null; privateBundleBytes = $null
     runtimeProfile = 'system'; runtimeFiles = @()
     machine = [ordered]@{ logicalProcessors = $null; totalPhysicalMemoryBytes = $null }
+    startupSeconds = 90
     renderingRequested = 'DX12 software fallback / Microsoft Basic Render Driver'; runs = @(); criteria = @(); metrics = $null; missingEvidence = @()
     scope = 'One official Windows build on a disposable software-rendered runner. No general gameplay or future-version certification.'
     clock = 'GetSystemTimePreciseAsFileTime in the unhooked parent process'
@@ -438,9 +439,14 @@ using System;
 using System.Diagnostics;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 public sealed class AZSGRemoteRow { public long FileTime; public string Payload; }
+public sealed class AZSGLoadingSnapshot {
+  public long observedFileTime,ready,total,placementsPending,collidersPending,mergesPending;
+  public double seconds; public bool awaitingSnap,settling,warm,uiPending;
+}
 public sealed class AZSGRemoteGame : IDisposable {
   public readonly ConcurrentQueue<AZSGRemoteRow> Rows = new ConcurrentQueue<AZSGRemoteRow>();
   public Process Child; public bool GpuFailure, Panicked, SoftwareObserved; public int Dropped;
@@ -449,9 +455,20 @@ public sealed class AZSGRemoteGame : IDisposable {
   readonly List<string> panicExcerpt=new List<string>();
   readonly ConcurrentDictionary<string,byte> startupCategories=new ConcurrentDictionary<string,byte>();
   bool panicStarted; int panicRemaining;
+  readonly object loadingLock=new object(); readonly List<AZSGLoadingSnapshot> loadingSnapshots=new List<AZSGLoadingSnapshot>();
+  bool loadingKnown,loadingWaiting,warmTimedOut; int loadingClears; long? warmPending;
+  static readonly Regex loadingWaitPattern=new Regex(@"loading screen: waiting (?<seconds>[0-9]{1,9}(?:\.[0-9]{1,3})?)s\s+(?:\u2014|-)\s+(?<ready>[0-9]{1,10})/(?<total>[0-9]{1,10}) resident,\s*(?<placements>[0-9]{1,10}) placements pending,\s*(?<colliders>[0-9]{1,10}) colliders pending,\s*(?<merges>[0-9]{1,10}) merges pending,\s*awaiting_snap=(?<snap>true|false),\s*settling=(?<settling>true|false),\s*warm=(?<warm>true|false),\s*ui_pending=(?<ui>true|false)");
+  static readonly Regex loadingClearPattern=new Regex(@"loading screen: cleared \((?<ready>[0-9]{1,10})/(?<total>[0-9]{1,10}) resident, (?<seconds>[0-9]{1,9}(?:\.[0-9]{1,3})?)s\)");
+  static readonly Regex warmTimeoutPattern=new Regex(@"pipeline warm: TIMED OUT with (?<pending>[0-9]{1,10}) pipelines pending");
   public bool PanicCaptureEnabled { get { return capturePanic; } }
   public string[] PanicExcerpt { get { lock(panicLock) { return panicExcerpt.ToArray(); } } }
   public string[] StartupCategories { get { var values=new List<string>(startupCategories.Keys); values.Sort(StringComparer.Ordinal); return values.ToArray(); } }
+  public AZSGLoadingSnapshot[] LoadingSnapshots { get { lock(loadingLock) { return loadingSnapshots.ToArray(); } } }
+  public bool LoadingCoverObserved { get { lock(loadingLock) { return loadingKnown; } } }
+  public bool LoadingCoverWaiting { get { lock(loadingLock) { return loadingKnown && loadingWaiting; } } }
+  public int LoadingClearObserved { get { lock(loadingLock) { return loadingClears; } } }
+  public bool PipelineWarmTimedOut { get { lock(loadingLock) { return warmTimedOut; } } }
+  public long? PipelineWarmPending { get { lock(loadingLock) { return warmPending; } } }
   [DllImport("kernel32.dll")] public static extern void GetSystemTimePreciseAsFileTime(out long time);
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window,int command);
@@ -466,6 +483,19 @@ public sealed class AZSGRemoteGame : IDisposable {
   [StructLayout(LayoutKind.Sequential)] struct Input { public uint Type; public Union Value; }
   public static long Wall() { long value; GetSystemTimePreciseAsFileTime(out value); return value; }
   static bool Has(string value,string needle) { return value.IndexOf(needle,StringComparison.OrdinalIgnoreCase)>=0; }
+  static long Count(Match match,string name) { return long.Parse(match.Groups[name].Value,CultureInfo.InvariantCulture); }
+  void ObserveLoading(string text) {
+    var wait=loadingWaitPattern.Match(text);
+    if(wait.Success) {
+      var snapshot=new AZSGLoadingSnapshot {observedFileTime=Wall(),seconds=double.Parse(wait.Groups["seconds"].Value,CultureInfo.InvariantCulture),
+        ready=Count(wait,"ready"),total=Count(wait,"total"),placementsPending=Count(wait,"placements"),collidersPending=Count(wait,"colliders"),mergesPending=Count(wait,"merges"),
+        awaitingSnap=wait.Groups["snap"].Value=="true",settling=wait.Groups["settling"].Value=="true",warm=wait.Groups["warm"].Value=="true",uiPending=wait.Groups["ui"].Value=="true"};
+      lock(loadingLock) { loadingKnown=true; loadingWaiting=true; loadingSnapshots.Add(snapshot); if(loadingSnapshots.Count>6) loadingSnapshots.RemoveAt(0); }
+    }
+    if(loadingClearPattern.IsMatch(text)) { lock(loadingLock) { loadingKnown=true; loadingWaiting=false; if(loadingClears<int.MaxValue) ++loadingClears; } }
+    var timeout=warmTimeoutPattern.Match(text);
+    if(timeout.Success) { lock(loadingLock) { warmTimedOut=true; warmPending=Count(timeout,"pending"); } }
+  }
   static string RedactedLine(string value) {
     if(value.Length>16384) value=value.Substring(0,16384);
     value=Regex.Replace(value,@"\x1B\[[0-?]*[ -/]*[@-~]","");
@@ -502,6 +532,7 @@ public sealed class AZSGRemoteGame : IDisposable {
     var panic=text.IndexOf("panicked at",StringComparison.Ordinal)>=0;
     if(panic) Panicked=true;
     ObserveStartup(text,panic);
+    if(Has(text,"loading screen:") || Has(text,"pipeline warm:")) ObserveLoading(text);
     var at=text.IndexOf("AZSGT1|",StringComparison.Ordinal); if(at<0 || text.Length-at>2048) return;
     if(Rows.Count>=8192) { System.Threading.Interlocked.Increment(ref Dropped); return; }
     Rows.Enqueue(new AZSGRemoteRow {FileTime=Wall(),Payload=text.Substring(at)});
@@ -635,9 +666,13 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
     $info = [Diagnostics.ProcessStartInfo]::new($exe)
     $info.WorkingDirectory = $GameRoot; $info.UseShellExecute = $false; $info.CreateNoWindow = $true
     $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
+    $info.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    $info.StandardErrorEncoding = [Text.UTF8Encoding]::new($false)
+    foreach ($credential in @('AZSG_GAME_BUNDLE_URL', 'GH_TOKEN', 'GITHUB_TOKEN', 'ACTIONS_RUNTIME_TOKEN')) { [void]$info.Environment.Remove($credential) }
     $info.Environment['WGPU_BACKEND'] = 'dx12'
     $info.Environment['WGPU_FORCE_FALLBACK_ADAPTER'] = '1'
     $info.Environment['WGPU_ADAPTER_NAME'] = 'Microsoft Basic Render Driver'
+    $info.Environment['RUST_LOG'] = 'info,wgpu_core=warn,wgpu_hal=warn,naga=warn'
     $info.Environment['WOW_WIN'] = '640x480'
     $info.Environment['BENILLA_HOME'] = $state
     $appData = Join-Path $GameRoot 'AppData'; New-Item -ItemType Directory -Path $appData | Out-Null
@@ -651,7 +686,7 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
     $telemetryInstance = 0L; $instanceSequences = @{}; $telemetryReloaded = $false; $playingInstance = 0L
     try {
         $session.Start($info)
-        while (([AZSGRemoteGame]::Wall() - $start) / 1e7 -lt 150) {
+        while (([AZSGRemoteGame]::Wall() - $start) / 1e7 -lt ($script:startupSeconds + 60)) {
             if ($session.Child.HasExited) {
                 # Complete already-exited process output callbacks before taking
                 # the bounded diagnostic snapshot, including lines after panic.
@@ -721,7 +756,7 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
                             $lastEscapeSeq = $latest.seq
                         }
                     } elseif ($samples.Count -gt 0 -and $latest.phase -ceq 'ready') {
-                        $readyInputAllowed = $true
+                        $readyInputAllowed = -not $session.LoadingCoverWaiting
                         if ($env:AZSG_CAPTURE_FRAME -ceq '1' -and -not $frameAttempted) {
                             if ($latest.mapContinent -gt 0 -and $latest.mapZone -gt 0 -and $latest.mapX -ge 0 -and $latest.mapY -ge 0) {
                                 $frameAttempted = $true
@@ -741,7 +776,7 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
                     }
                 }
             }
-            if ($null -eq $firstPlayingAt -and ($now - $start) / 1e7 -gt 90) { break }
+            if ($null -eq $firstPlayingAt -and ($now - $start) / 1e7 -gt $script:startupSeconds) { break }
             if (-not $inputOkay) {
                 if ($session.Child.HasExited) {
                     $session.Child.WaitForExit()
@@ -769,6 +804,9 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
             frameCapture = $capture
             telemetryInstanceCount = $instanceSequences.Count; telemetryReloaded = $telemetryReloaded
             peakWorkingSetBytes = $peakWorkingSet; responding = $responding
+            startupSeconds = $script:startupSeconds; loadingCoverObserved = $session.LoadingCoverObserved; loadingCoverWaiting = $session.LoadingCoverWaiting
+            loadingClearObserved = $session.LoadingClearObserved; loadingSnapshots = @($session.LoadingSnapshots)
+            pipelineWarmTimedOut = $session.PipelineWarmTimedOut; pipelineWarmPending = $session.PipelineWarmPending
             droppedTelemetry = $session.Dropped; samples = $samples.ToArray() }
     } finally {
         $session.Dispose()
@@ -833,6 +871,15 @@ function Get-StageMetrics($Run, [int]$Stage) {
 
 try {
     New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
+    $script:startupSeconds = 90
+    if (-not [string]::IsNullOrWhiteSpace($env:AZSG_STARTUP_SECONDS)) {
+        [int]$requestedStartup = 0
+        if ($env:AZSG_STARTUP_SECONDS -cnotmatch '^[0-9]{2,3}$' -or
+            -not [int]::TryParse($env:AZSG_STARTUP_SECONDS, [ref]$requestedStartup) -or
+            $requestedStartup -lt 90 -or $requestedStartup -gt 300) { throw 'blocked_startup_limit' }
+        $script:startupSeconds = $requestedStartup
+    }
+    $report.startupSeconds = $script:startupSeconds
     try {
         $machine = @(Get-CimInstance -ClassName Win32_ComputerSystem -Property NumberOfLogicalProcessors,TotalPhysicalMemory -OperationTimeoutSec 5 -ErrorAction Stop)
         if ($machine.Count -eq 1) {
