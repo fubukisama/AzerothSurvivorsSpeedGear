@@ -135,6 +135,7 @@ local function press(key)
     if (actions[action]) then actions[action]();
     elseif (action) then table.insert(gameActions, action); end
 end
+local function release(key) invoke(AZSSpeedGear.panel, "OnKeyUp", key); end
 local function click(name) invoke(frames[name], "OnClick"); end
 local function hasPanelText(text)
     for _, font in ipairs(AZSSpeedGear.panel.fontStrings) do
@@ -222,11 +223,59 @@ click("AZSSpeedGearHotkeyReset");
 check(AZSSpeedGearDB.hotkeyDown == "Q" and AZSSpeedGearDB.hotkeyUp == "E" and bindings["ALT-CTRL-SHIFT-R"] == nil,
     "reset restores Q and E and removes previously unbound custom chord");
 
+-- A delayed client may report the OS modifier as released while dispatching an
+-- earlier key-down. The recorder must retain the modifier event order itself.
+modifiers.alt, modifiers.ctrl, modifiers.shift = false, nil, false;
+previousWrites = table.getn(writes);
+click("AZSSpeedGearHotkeyUp"); press("CTRL"); press("T");
+check(AZSSpeedGearDB.hotkeyUp == "CTRL-T" and bindings["CTRL-T"] == "AZSG_FASTER"
+    and bindings.E == "STRAFERIGHT", "queued CTRL then T captures CTRL-T even when the native modifier query is nil");
+check(not AZSSpeedGear.panel.keyboard and AZSSpeedGear.panel.scripts.OnKeyDown == nil
+    and AZSSpeedGear.panel.scripts.OnKeyUp == nil, "successful queued modifier capture removes both keyboard handlers");
+click("AZSSpeedGearHotkeyReset");
+click("AZSSpeedGearHotkeyUp"); press("CTRL"); release("CTRL"); press("T");
+check(AZSSpeedGearDB.hotkeyUp == "T" and bindings.T == "AZSG_FASTER" and bindings["CTRL-T"] == nil,
+    "a modifier released before the normal key is not retained in the chord");
+click("AZSSpeedGearHotkeyReset");
+click("AZSSpeedGearHotkeyDown"); press("SHIFT"); press("ALT"); press("CTRL"); press("R");
+check(AZSSpeedGearDB.hotkeyDown == "ALT-CTRL-SHIFT-R" and bindings["ALT-CTRL-SHIFT-R"] == "AZSG_SLOWER",
+    "queued Shift Alt and Ctrl events form a canonical combined chord with stale native queries");
+click("AZSSpeedGearHotkeyReset");
+click("AZSSpeedGearHotkeyUp"); press("SHIFT"); press("ALT"); release("ALT"); press("T");
+check(AZSSpeedGearDB.hotkeyUp == "SHIFT-T" and bindings["SHIFT-T"] == "AZSG_FASTER",
+    "releasing Alt clears only Alt while the queued Shift press remains held");
+click("AZSSpeedGearHotkeyReset");
+
+-- The native query is still needed when a modifier was already held before
+-- clicking the recorder and therefore has no key-down event in this capture.
+modifiers.ctrl = 1;
+click("AZSSpeedGearHotkeyUp"); press("T");
+modifiers.ctrl = nil;
+check(AZSSpeedGearDB.hotkeyUp == "CTRL-T" and bindings["CTRL-T"] == "AZSG_FASTER",
+    "a modifier already held before recording is read from the native query");
+click("AZSSpeedGearHotkeyReset");
+
+click("AZSSpeedGearHotkeyUp"); press("CTRL"); press("ESCAPE");
+check(not AZSSpeedGear.panel.keyboard and AZSSpeedGear.panel.scripts.OnKeyDown == nil
+    and AZSSpeedGear.panel.scripts.OnKeyUp == nil, "Escape removes both capture handlers after a modifier press");
+click("AZSSpeedGearHotkeyUp"); press("T");
+check(AZSSpeedGearDB.hotkeyUp == "T", "cancelled recording does not leak a modifier into the next recording");
+click("AZSSpeedGearHotkeyReset");
+click("AZSSpeedGearHotkeyUp"); press("SHIFT"); AZSSpeedGear.panel:Hide();
+check(not AZSSpeedGear.panel.keyboard and AZSSpeedGear.panel.scripts.OnKeyDown == nil
+    and AZSSpeedGear.panel.scripts.OnKeyUp == nil, "panel hide removes both capture handlers after a modifier press");
+SlashCmdList.AZSSPEEDGEAR("show");
+click("AZSSpeedGearHotkeyUp"); press("T");
+check(AZSSpeedGearDB.hotkeyUp == "T", "hidden recording does not leak a modifier into the next recording");
+click("AZSSpeedGearHotkeyReset");
+check(table.getn(writes) == previousWrites, "recording queued modifiers never changes speed or emits a speed request");
+modifiers.alt, modifiers.ctrl, modifiers.shift = false, false, false;
+
 click("AZSSpeedGearHotkeyUp"); press("Q");
 check(AZSSpeedGear.panel.keyboard and AZSSpeedGearDB.hotkeyUp == "E"
     and hasPanelText(AZSSpeedGearI18n.Text("hotkey_duplicate")), "duplicate assignment reports the problem and keeps listening");
 press("ESCAPE");
-check(not AZSSpeedGear.panel.keyboard and AZSSpeedGearDB.hotkeyUp == "E"
+check(not AZSSpeedGear.panel.keyboard and AZSSpeedGear.panel.scripts.OnKeyUp == nil and AZSSpeedGearDB.hotkeyUp == "E"
     and hasPanelText(AZSSpeedGearI18n.Text("hotkey_hint")), "Escape cancels duplicate capture without changing settings");
 click("AZSSpeedGearHotkeyUp"); press("BACKSPACE");
 check(not AZSSpeedGear.panel.keyboard and AZSSpeedGearDB.hotkeyUp == "" and bindings.E == "STRAFERIGHT",
@@ -253,7 +302,7 @@ check(not saveOk and string.find(tostring(saveError), "original SaveBindings fai
 click("AZSSpeedGearHotkeyDown");
 check(AZSSpeedGear.panel.keyboard, "capture begins before panel-hide cancellation");
 AZSSpeedGear.panel:Hide();
-check(not AZSSpeedGear.panel.keyboard and AZSSpeedGear.panel.scripts.OnKeyDown == nil,
+check(not AZSSpeedGear.panel.keyboard and AZSSpeedGear.panel.scripts.OnKeyDown == nil and AZSSpeedGear.panel.scripts.OnKeyUp == nil,
     "native OnHide cancels capture and removes its keyboard handler");
 SlashCmdList.AZSSPEEDGEAR("show");
 check(not AZSSpeedGear.panel.keyboard, "reopening the panel does not resume stale capture");
@@ -273,7 +322,7 @@ check(AZSSpeedGearDB.hotkeyDown == "Q" and AZSSpeedGearDB.hotkeyUp == "E" and sa
 
 click("AZSSpeedGearHotkeyUp");
 fire("PLAYER_LEAVING_WORLD");
-check(not AZSSpeedGear.panel.keyboard and AZSSpeedGear.panel.scripts.OnKeyDown == nil,
+check(not AZSSpeedGear.panel.keyboard and AZSSpeedGear.panel.scripts.OnKeyDown == nil and AZSSpeedGear.panel.scripts.OnKeyUp == nil,
     "world exit cancels active capture");
 check(same(bindings, originals) and not AZSSpeedGear.hotkeys.active, "world exit restores the complete original game key map");
 check(not AZSSpeedGear.controller.active and AZSSpeedGear.controller.desiredSpeed100 == 100,
