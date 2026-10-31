@@ -24,6 +24,55 @@ publication phases, requiring confirmation within five seconds at its 30/60 FPS
 cadences and no drops over the following thirty seconds. It also checks wrong
 rates, independent client-clock changes, recovery and frozen raw data.
 
+Two further remote regressions came from the real disposable game client. A
+fresh 1.4-second hitch crossed two integer-clock boundaries and incorrectly
+discarded history; a matching sample now retains that short window, while
+nonprogressing or larger gaps still clear it. Remote run
+[41191234178](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41191234178)
+failed that regression before the fix; run
+[41191486278](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41191486278)
+passed it with all 27 tests.
+
+The recorded sparse-arrival replay then reproduced four false confirmation
+drops in remote run
+[41192823531](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41192823531),
+even though its complete feasible interval remained inside the target range.
+Bucket-center point slopes can be phase-biased. A recent trend can now revoke
+confidence only when all four latest completed buckets contain at least four
+distinct positive raw arrivals and each spans at least 75% of the independent
+rate upper bound. No older bucket fills a sparse recent window. For a constant
+rate, that coverage bounds the center phase error to 0.125 seconds and the
+four-center slope bias to 10% of that rate. It protects exact-target stability;
+a rate near the tolerance boundary can still conservatively become pending.
+The trend never grants confirmation or supplies elapsed time. Full-interval
+entry, wrong-rate rejection and stale-data revocation retain their existing
+thresholds. The replay also requires frozen progress to revoke and an
+eightfold wrong raw rate to remain unconfirmed. It preserves recorded numerical
+arrival rows, with synthetic stamp-health inputs because the original telemetry
+did not capture the production sampler's clock and publication stamp. It is
+not a replay of the entire game or a new movement/skill timing certification.
+
+An additional independent constant-0.5x oracle shifts the centers of three
+half-second-spanning publications per bucket. Its naked short slope is 0.416x,
+while the full interval remains valid. All thirteen adversarial observations
+must retain confirmation. The existing dense 12% deviation / four-second
+revocation regression is kept unchanged; the sampling gate does not replace it
+with a looser expected result.
+
+The final production measurement code, runtime source `61fd597`, passed the
+real 0.131.0 client test in private run `41193567550`. The byte-preserved
+[numerical report](evidence/confirmation0131.json), SHA-256
+`83f4dbe349ec205a5dbc57be8d806f1dc44e5dc2560de344c7ea4dc5a666ffc4`,
+records physical Q selecting 0.5x, first confirmation after 11.442 seconds on
+the slow software-rendering runner, and 5.194 further real seconds of actual
+confirmed launcher text with zero drops or missing telemetry frames. Eighteen
+distinct raw progress values yielded 0.49805x over 15.741 independent parent-clock
+seconds. Its first confirmation interval was inside the original 10% tolerance,
+and a fresh native 0.5x receipt was observed. All nine criteria passed and the
+game exited normally. This is numerical runtime text/state acceptance rather
+than pixel rendering, movement or skill timing acceptance. The private game
+bundle was reused; no game assets are included in this repository or report.
+
 ## Version 0.7.2 numeric launcher while confirmation is pending
 
 The new production-UI regression failed against the previous display in remote

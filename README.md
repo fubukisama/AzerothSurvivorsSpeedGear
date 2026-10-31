@@ -4,7 +4,9 @@ Version 0.7.3 measures fresh raw publications against independent wall-clock
 seconds in a continuously updated bounded window. Confirmation no longer clears
 its own evidence or repeatedly restarts after twelve seconds. Confidence still
 requires the whole possible rate interval to match; wrong, frozen or interrupted
-progress revokes it. Sparse observations can require longer to become conclusive.
+progress revokes it. A short fresh-data hitch no longer discards a live window,
+and sparse short-term samples no longer override a matching full interval.
+Sparse observations can require longer to become conclusive.
 
 Version 0.7.2 keeps the numeric target visible while measurement is pending:
 **Target ×2 …**. A definite mismatch uses **Target ×2 !**; only confirmed
