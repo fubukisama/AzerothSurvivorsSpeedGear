@@ -32,6 +32,12 @@ These observations establish input dispatch, rebinding, persistence and native
 delivery on this game build, not uniform movement/skill scaling or future-build
 compatibility.
 
+The independent [remote verification](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41184739316)
+passed against the original report bytes, along with ten rejection/verification
+tests. It rechecks raw physical inputs, recorded UI events, fresh native receipts
+and save/reload evidence. The separate [functional verdict](evidence/hotkeys0131.json)
+preserves the original failure and final-close warning.
+
 Full-game runs reuse an indexed private resource bundle while the game EXE and
 MPQ manifest remain unchanged. A plugin change or rerun does not require another
 upload from the user's machine. Each disposable runner still verifies the cached

@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "product": "AzerothSurvivorsSpeedGear",
+  "status": "passed",
+  "acceptance": "physical_hotkeys_and_saved_restart_only",
+  "sourceCommit": "66967a64091c03176bd12f9f24d43637d1d55b6b",
+  "gameVersion": "0.131.0",
+  "gameSha256": "5dd6819d836748ccf809ab76fe6509c9ee793e087939b5d036c430d835a14e63",
+  "pluginVersion": "0.7.1",
+  "sourceReportSHA256": "e09fa33cf030e13d2800b3a7c8dd8ae940f301429528ca07d7081fcce9a14956",
+  "ciRunId": "41183605168",
+  "originalRun": {
+    "status": "failed",
+    "reason": "failed_session3_graceful_exit",
+    "passedCriteria": 50,
+    "totalCriteria": 51
+  },
+  "verified": [
+    "physical_default_q_e",
+    "fresh_native_0.5_1_2",
+    "physical_panel_r_ctrl_t_recording",
+    "original_q_e_restored",
+    "hidden_panel_custom_keys",
+    "clean_save_and_restart",
+    "reloaded_physical_keys_and_native_speed"
+  ],
+  "cleanupWarning": "The final third-session window did not exit within 30 seconds; the original workflow remains failed.",
+  "finalSessionGracefulExit": false,
+  "scope": "Numerical and physical-input functionality on one remote game build. Screenshots are not fresh visual acceptance. No uniform movement, skill timing, future-version or clean-final-shutdown certification."
+}
