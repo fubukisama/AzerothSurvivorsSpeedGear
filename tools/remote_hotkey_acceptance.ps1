@@ -17,9 +17,12 @@ public static class AZSGHotkeyMouse {
   [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr window,ref Point point);
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x,int y);
   [DllImport("user32.dll")] static extern uint SendInput(uint count,Input[] input,int size);
-  public static bool Click(IntPtr window,int x,int y,bool down) {
+  public static bool MoveClient(IntPtr window,int x,int y) {
     var point=new Point {X=x,Y=y};
-    if(!ClientToScreen(window,ref point) || !SetCursorPos(point.X,point.Y)) return false;
+    return ClientToScreen(window,ref point) && SetCursorPos(point.X,point.Y);
+  }
+  public static bool Click(IntPtr window,int x,int y,bool down) {
+    if(!MoveClient(window,x,y)) return false;
     var input=new Input {Type=0}; input.Value.Mouse.Flags=down?2u:4u;
     return SendInput(1,new[]{input},Marshal.SizeOf(typeof(Input)))==1;
   }
@@ -89,11 +92,48 @@ public static class AZSGHotkeyMouse {
         if ($null -eq $size -or $null -eq $point -or $point.Count -ne 2 -or $point[0] -le 0 -or $point[0] -ge 1 -or $point[1] -le 0 -or $point[1] -ge 1 -or -not $script:hk.session.Focus()) { throw 'blocked_button_coordinates' }
         $x=[int][Math]::Round($point[0]*$size[0]); $y=[int][Math]::Round($point[1]*$size[1])
         $window=$script:hk.session.Child.MainWindowHandle
+        $hoverStarted=[AZSGRemoteGame]::Wall(); $hoverFrame=$script:hk.current.frames; $hoverObserved=$false
+        $moved=[AZSGHotkeyMouse]::MoveClient($window,$x,$y)
+        $script:hk.input.Add([pscustomobject]@{fileTime=$hoverStarted; kind='mouse_move'; button=$Name; x=$x; y=$y; sent=$moved})
+        if (-not $moved) { throw 'blocked_input_or_foreground' }
+        while (([AZSGRemoteGame]::Wall()-$hoverStarted)/1e7 -lt 6) {
+            Drain-Hotkey
+            if ($script:hk.current.frames -gt $hoverFrame) { $hoverObserved=$true; break }
+            Start-Sleep -Milliseconds 50
+        }
+        if (-not $hoverObserved) { throw 'blocked_mouse_hover_cadence' }
+        $started=[AZSGRemoteGame]::Wall(); $firstFrame=$script:hk.current.frames; $frameObserved=$false
         $okay=[AZSGHotkeyMouse]::Click($window,$x,$y,$true)
-        Pause-Hotkey 450
-        $okay=[AZSGHotkeyMouse]::Click($window,$x,$y,$false) -and $okay
-        $script:hk.input.Add([pscustomobject]@{fileTime=[AZSGRemoteGame]::Wall(); kind='mouse'; button=$Name; x=$x; y=$y; sent=$okay})
+        try {
+            # Mouse hit-testing needs the down state to survive rendered frames.
+            # A 450ms click can fall entirely inside one software-rendered frame.
+            # Keep OS input held through two observed client updates, bounded by
+            # six seconds; this never invokes the panel's callback directly.
+            while (([AZSGRemoteGame]::Wall()-$started)/1e7 -lt 6) {
+                Drain-Hotkey
+                if ($script:hk.current.frames -ge $firstFrame+2) { $frameObserved=$true; break }
+                Start-Sleep -Milliseconds 50
+            }
+        } finally {
+            $okay=[AZSGHotkeyMouse]::Click($window,$x,$y,$false) -and $okay
+            $finished=[AZSGRemoteGame]::Wall()
+            $script:hk.input.Add([pscustomobject]@{fileTime=$finished; kind='mouse'; button=$Name; x=$x; y=$y; sent=$okay; downFileTime=$started; holdMilliseconds=($finished-$started)/10000.0; firstFrame=$firstFrame; releaseFrame=$script:hk.current.frames})
+        }
         if (-not $okay) { throw 'blocked_input_or_foreground' }
+        if (-not $frameObserved) { throw 'blocked_mouse_frame_cadence' }
+    }
+    function Open-HotkeyCapture([string]$Button,[string]$Criterion) {
+        Click-Hotkey $Button
+        $until=[AZSGRemoteGame]::Wall()+50000000L
+        do {
+            Drain-Hotkey
+            if ($script:hk.current.capture -eq 1) { Assert-Hotkey $Criterion $true $script:hk.current; return }
+            Start-Sleep -Milliseconds 50
+        } while ([AZSGRemoteGame]::Wall() -lt $until)
+        # One bounded physical retry tolerates a slow hit-test/update boundary;
+        # the acceptance condition remains the real recorder becoming active.
+        Click-Hotkey $Button
+        Wait-Hotkey $Criterion { $script:hk.current.capture -eq 1 }
     }
     function Step-Hotkey([string]$Name,[uint16]$Key,[int]$Expected,[int]$Direction,[uint16]$Modifier=0) {
         Drain-Hotkey; $script:hk.previousActions=$script:hk.current.actions
@@ -175,9 +215,9 @@ public static class AZSGHotkeyMouse {
         $script:hk.phase='panel_rebind'
         Click-Hotkey 'launcher'; Wait-Hotkey 'panel_opened' { $script:hk.current.panel -eq 1 }
         Click-Hotkey 'stopButton'; Wait-Hotkey 'panel_stop' { $script:hk.current.desired -eq 100 -and $script:hk.current.speed -eq 100 }
-        Click-Hotkey 'downButton'; Wait-Hotkey 'record_down_opened' { $script:hk.current.capture -eq 1 }
+        Open-HotkeyCapture 'downButton' 'record_down_opened'
         Tap-Hotkey 0x52; Wait-Hotkey 'record_down_r' { $script:hk.current.down -ceq 'R' -and $script:hk.current.capture -eq 0 -and $script:hk.current.r -ceq 'AZSG_SLOWER' }
-        Click-Hotkey 'upButton'; Wait-Hotkey 'record_up_opened' { $script:hk.current.capture -eq 1 }
+        Open-HotkeyCapture 'upButton' 'record_up_opened'
         Tap-Hotkey 0x54 0x11; Wait-Hotkey 'record_up_ctrl_t' { $script:hk.current.up -ceq 'CTRL-T' -and $script:hk.current.capture -eq 0 -and $script:hk.current.ctrlT -ceq 'AZSG_FASTER' }
         Capture-Hotkey 1
         Click-Hotkey 'closeButton'; Wait-Hotkey 'panel_hidden' { $script:hk.current.panel -eq 0 }
