@@ -540,13 +540,18 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
                 }
             }
             if ($null -eq $firstPlayingAt -and ($now - $start) / 1e7 -gt 5 -and ($now - $lastEnter) / 1e7 -gt 5) {
-                # Enter selects Play in the picker. Once the scene reports ready,
-                # movement starts the run; Enter there can instead open chat.
-                if ($samples.Count -eq 0 -or $samples[$samples.Count - 1].phase -ceq 'unknown') { $inputOkay = $session.Tap(0x0d) -and $inputOkay }
-                $inputOkay = $session.Key(0x57, $true) -and $inputOkay
-                Start-Sleep -Milliseconds 1500
-                $inputOkay = $session.Key(0x57, $false) -and $inputOkay
+                # Loading assets or software shaders can leave no usable window
+                # yet. Retry focus only every five seconds, within the existing
+                # startup deadline; never send keys to an unavailable window.
                 $lastEnter = $now
+                if ($session.Focus()) {
+                    # Enter selects Play in the picker. Once the scene reports
+                    # ready, movement starts the run; Enter can instead open chat.
+                    if ($samples.Count -eq 0 -or $samples[$samples.Count - 1].phase -ceq 'unknown') { $inputOkay = $session.Tap(0x0d) -and $inputOkay }
+                    $inputOkay = $session.Key(0x57, $true) -and $inputOkay
+                    Start-Sleep -Milliseconds 1500
+                    $inputOkay = $session.Key(0x57, $false) -and $inputOkay
+                }
             }
             if ($null -eq $firstPlayingAt -and ($now - $start) / 1e7 -gt 90) { break }
             if (-not $inputOkay) { $reason = 'blocked_input_or_foreground'; break }
