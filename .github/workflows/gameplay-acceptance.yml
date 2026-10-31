@@ -13,6 +13,14 @@ on:
         required: false
         type: string
         default: ''
+      runtime_profile:
+        description: Disposable software-rendering runtime
+        required: true
+        type: choice
+        default: system
+        options:
+          - system
+          - updated_warp
 
 permissions:
   contents: read
@@ -26,10 +34,85 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 25
     steps:
+      - name: Validate optional private transfer identity
+        shell: pwsh
+        env:
+          BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+          BUNDLE_BYTES: ${{ inputs.bundle_bytes }}
+          TRANSFER_URL: ${{ secrets.AZSG_LOCAL_GAME_TRANSFER_URL }}
+          RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RUNTIME_PROFILE -cnotin @('system', 'updated_warp')) { throw 'Invalid runtime profile.' }
+          if ($env:BUNDLE_SHA256 -ne '' -or $env:BUNDLE_BYTES -ne '') {
+            if ($env:BUNDLE_SHA256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Invalid private bundle digest.' }
+            if ($env:BUNDLE_BYTES -cnotmatch '^[1-9][0-9]{0,9}$' -or [long]$env:BUNDLE_BYTES -ge 2GB) { throw 'Invalid private bundle byte count.' }
+            if ([string]::IsNullOrWhiteSpace($env:TRANSFER_URL)) { throw 'Private transfer URL is absent.' }
+          }
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Prepare the verified disposable DXC and WARP profile
+        if: inputs.runtime_profile == 'updated_warp'
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $runtimeRoot = Join-Path $env:RUNNER_TEMP ('AZSGRuntime-' + [guid]::NewGuid().ToString('N'))
+          $drivers = Join-Path $runtimeRoot 'Drivers'
+          New-Item -ItemType Directory -Path $drivers -Force | Out-Null
+
+          function Get-VerifiedNuGetPackage([string]$Uri, [string]$Target, [long]$Bytes, [string]$SHA512) {
+            Invoke-WebRequest -Uri $Uri -OutFile $Target -TimeoutSec 90 -MaximumRetryCount 2 -RetryIntervalSec 2
+            if ((Get-Item -LiteralPath $Target).Length -ne $Bytes) { throw 'Runtime package size mismatch.' }
+            $algorithm = [Security.Cryptography.SHA512]::Create()
+            $stream = [IO.File]::OpenRead($Target)
+            try { $actual = [Convert]::ToBase64String($algorithm.ComputeHash($stream)) }
+            finally { $stream.Dispose(); $algorithm.Dispose() }
+            if ($actual -cne $SHA512) { throw 'Runtime package SHA-512 mismatch.' }
+          }
+
+          function Export-VerifiedDll([string]$Archive, [string]$EntryName, [string]$Name, [long]$Bytes) {
+            $zip = [IO.Compression.ZipFile]::OpenRead($Archive)
+            try {
+              $entry = $zip.GetEntry($EntryName)
+              if ($null -eq $entry -or $entry.Length -ne $Bytes) { throw 'Runtime DLL entry mismatch.' }
+              $source = $entry.Open()
+              $destination = [IO.File]::Open((Join-Path $drivers $Name), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+              try { $source.CopyTo($destination) }
+              finally { $destination.Dispose(); $source.Dispose() }
+            } finally { $zip.Dispose() }
+          }
+
+          # Official DXC v1.8.2502 release also identifies this NuGet build:
+          # https://github.com/microsoft/DirectXShaderCompiler/releases/tag/v1.8.2502
+          # Immutable NuGet catalog (package SHA-512 and exact byte length):
+          # https://api.nuget.org/v3/catalog0/data/2025.02.21.22.10.24/microsoft.direct3d.dxc.1.8.2502.8.json
+          $dxc = Join-Path $runtimeRoot 'dxc.nupkg'
+          Get-VerifiedNuGetPackage `
+            'https://api.nuget.org/v3-flatcontainer/microsoft.direct3d.dxc/1.8.2502.8/microsoft.direct3d.dxc.1.8.2502.8.nupkg' `
+            $dxc 47970984 `
+            'Bo8uq40se8GfJ9DF0rBIlVmPiZjwNrAg7F5iCNbEBouAzPdAB4WygCH5hL7WYLNlNbw2qm/xGxW+JaGT47kHzA=='
+
+          # Same WARP version used by wgpu v27.0.1 Windows CI:
+          # https://github.com/gfx-rs/wgpu/blob/v27.0.1/.github/actions/install-warp/action.yml
+          # https://api.nuget.org/v3/catalog0/data/2024.08.22.17.23.50/microsoft.direct3d.warp.1.0.13.json
+          $warp = Join-Path $runtimeRoot 'warp.nupkg'
+          Get-VerifiedNuGetPackage `
+            'https://api.nuget.org/v3-flatcontainer/microsoft.direct3d.warp/1.0.13/microsoft.direct3d.warp.1.0.13.nupkg' `
+            $warp 12992499 `
+            'n15ICUfL3UM/Rv/RoAgF21uFRZOIZ8Sivs8bSdhd1YI0kUxFyvO4Robf1kLp1lXx31bQWgZfXdxVG/bxrtWBYg=='
+
+          Export-VerifiedDll $dxc 'build/native/bin/x64/dxcompiler.dll' 'dxcompiler.dll' 17986592
+          Export-VerifiedDll $dxc 'build/native/bin/x64/dxil.dll' 'dxil.dll' 1508896
+          Export-VerifiedDll $warp 'build/native/bin/x64/d3d10warp.dll' 'd3d10warp.dll' 6051248
+          if (@(Get-ChildItem -LiteralPath $drivers -File).Count -ne 3) { throw 'Unexpected runtime DLL count.' }
+          "AZSG_REMOTE_RUNTIME_DLL_DIR=$drivers" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Build only this project's native runtime and structural probe
         shell: pwsh
         run: |
@@ -45,9 +128,14 @@ jobs:
       - name: Run ephemeral official game with software rendering
         shell: pwsh
         env:
-          AZSG_GAME_BUNDLE_URL: ${{ secrets.AZSG_GAME_BUNDLE_URL }}
+          AZSG_GAME_BUNDLE_URL: ${{ inputs.bundle_sha256 != '' && inputs.bundle_bytes != '' && secrets.AZSG_LOCAL_GAME_TRANSFER_URL || '' }}
           AZSG_GAME_BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
           AZSG_GAME_BUNDLE_BYTES: ${{ inputs.bundle_bytes }}
+          AZSG_CAPTURE_PANIC: '1'
+          AZSG_CAPTURE_FRAME: '0'
+          AZSG_REMOTE_RUNTIME_DLL_DIR: ${{ env.AZSG_REMOTE_RUNTIME_DLL_DIR }}
+          AZSG_REMOTE_RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
+          WGPU_DX12_COMPILER: ${{ inputs.runtime_profile == 'updated_warp' && 'dxc' || '' }}
         run: ./tools/remote_game_acceptance.ps1 -PackagePath $env:AZSG_ACCEPTANCE_PACKAGE -OutputPath acceptance/report.json
       - name: Retain only our bounded numerical report
         if: always()

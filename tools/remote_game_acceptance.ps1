@@ -24,6 +24,7 @@ $report = [ordered]@{ schema = 1; product = 'AzerothSurvivorsSpeedGear'; status 
     gameVersion = $null; gameSha256 = $null; gameBytes = $null; officialAssetsSha256 = $null; candidateDllSha256 = $null; pluginVersion = $null
     gameSource = 'official_download'; privateBundleSha256 = $null; privateBundleBytes = $null
     runtimeProfile = 'system'; runtimeFiles = @()
+    machine = [ordered]@{ logicalProcessors = $null; totalPhysicalMemoryBytes = $null }
     renderingRequested = 'DX12 software fallback / Microsoft Basic Render Driver'; runs = @(); criteria = @(); metrics = $null; missingEvidence = @()
     scope = 'One official Windows build on a disposable software-rendered runner. No general gameplay or future-version certification.'
     clock = 'GetSystemTimePreciseAsFileTime in the unhooked parent process'
@@ -754,12 +755,20 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
         $capture = if ($frameAttempted) { $earlyCapture }
             elseif ($reason -cne 'observed') { Capture-BlockedFrame $session $Mode }
             else { [pscustomobject]@{ requested = $false; screenshotCaptured = $false; code = 'not_needed'; width = 0; height = 0; progressStage = 'none' } }
+        $peakWorkingSet = $null; $responding = $null
+        try {
+            $session.Child.Refresh()
+            $peak = [long]$session.Child.PeakWorkingSet64
+            if ($peak -ge 0) { $peakWorkingSet = $peak }
+        } catch { }
+        try { if (-not $session.Child.HasExited) { $responding = [bool]$session.Child.Responding } } catch { }
         return [pscustomobject]@{ mode = $Mode; status = $reason; softwareAdapterObserved = $session.SoftwareObserved
             processExitCode = $(if ($session.Child.HasExited) { $session.Child.ExitCode } else { $null })
             gpuFailure = $session.GpuFailure; panicked = $session.Panicked
             startupCategories = @($session.StartupCategories); panicCaptureEnabled = $session.PanicCaptureEnabled; panicExcerpt = @($session.PanicExcerpt)
             frameCapture = $capture
             telemetryInstanceCount = $instanceSequences.Count; telemetryReloaded = $telemetryReloaded
+            peakWorkingSetBytes = $peakWorkingSet; responding = $responding
             droppedTelemetry = $session.Dropped; samples = $samples.ToArray() }
     } finally {
         $session.Dispose()
@@ -824,6 +833,15 @@ function Get-StageMetrics($Run, [int]$Stage) {
 
 try {
     New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
+    try {
+        $machine = @(Get-CimInstance -ClassName Win32_ComputerSystem -Property NumberOfLogicalProcessors,TotalPhysicalMemory -OperationTimeoutSec 5 -ErrorAction Stop)
+        if ($machine.Count -eq 1) {
+            $processors = [long]$machine[0].NumberOfLogicalProcessors
+            $memory = [long]$machine[0].TotalPhysicalMemory
+            if ($processors -ge 1 -and $processors -le 1024) { $report.machine.logicalProcessors = $processors }
+            if ($memory -ge 1 -and $memory -le 17592186044416L) { $report.machine.totalPhysicalMemoryBytes = $memory }
+        }
+    } catch { }
     # A private asset repository can check out this plugin at a pinned commit;
     # its workflow GITHUB_SHA names that other repository, not the plugin code.
     $sourceIdentity = @(& git -C $projectRoot rev-parse HEAD 2>$null)
