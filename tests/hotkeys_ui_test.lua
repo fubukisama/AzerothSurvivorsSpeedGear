@@ -39,8 +39,8 @@ local function frameStub(name, kind, parent)
     function frame:SetHeight(value) self.height = value; end
     function frame:GetWidth() return self.width; end
     function frame:GetHeight() return self.height; end
-    function frame:SetFont(face, size) self.fontSize = size; end
-    function frame:GetFont() return "fixture-font", self.fontSize or 12, ""; end
+    function frame:SetFont(face, size) self.fontFace, self.fontSize = face, size; end
+    function frame:GetFont() return self.fontFace or "fixture-font", self.fontSize or 12, ""; end
     function frame:GetFontString()
         if (self.kind ~= "Button") then return nil; end
         if (not self.buttonFont) then
@@ -58,6 +58,7 @@ local function frameStub(name, kind, parent)
             elseif (byte >= 224) then width = width + size;
             elseif (byte >= 192) then width = width + size * 0.63; end
         end
+        if (self.fontFace == "fixture-alternate") then width = width * 1.27; end
         return width;
     end
     function frame:GetStringHeight()
@@ -412,6 +413,13 @@ check(downButton.width > narrowKeyWidth, "recording a long chord grows the butto
 checkPanelLayout("long custom chord");
 click("AZSSpeedGearHotkeyReset");
 check(downButton.width == narrowKeyWidth, "resetting Q/E shrinks the button again");
+-- A native button's current style can differ from GameFontNormal. The sizer
+-- must copy that face/size and invalidate the old metric, not assume the default.
+downButton:GetFontString():SetFont("fixture-alternate", 12);
+click("AZSSpeedGearHotkeyReset");
+checkPanelLayout("native button font override");
+downButton:GetFontString():SetFont("fixture-font", 11);
+click("AZSSpeedGearHotkeyReset");
 UIParent:SetWidth(320); SlashCmdList.AZSSPEEDGEAR("show");
 checkPanelLayout("narrow viewport");
 UIParent:SetWidth(960); SlashCmdList.AZSSPEEDGEAR("show");

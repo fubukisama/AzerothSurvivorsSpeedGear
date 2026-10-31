@@ -867,14 +867,23 @@ end
 local function textWidth(widget)
     local text = widgetValue(widget, "GetText") or "";
     local size = widget.speedGearTextSize or 11;
-    local cacheKey = tostring(size) .. ":" .. text;
-    if (layoutState.widthCache[cacheKey]) then return layoutState.widthCache[cacheKey]; end
     local font = widget;
     if (type(widget.GetFontString) == "function") then font = widgetValue(widget, "GetFontString") or widget; end
+    local face, flags;
+    if (type(font.GetFont) == "function") then
+        local ok, currentFace, currentSize, currentFlags = pcall(font.GetFont, font);
+        if (ok and type(currentFace) == "string" and finiteNumber(currentSize) and currentSize > 0) then
+            face, size, flags = currentFace, currentSize, currentFlags or "";
+        end
+    end
+    local cacheKey = (face or "native-default") .. ":" .. tostring(size) .. ":" .. (flags or "") .. ":" .. text;
+    if (layoutState.widthCache[cacheKey]) then return layoutState.widthCache[cacheKey]; end
     -- Measure outside the live label's wrapping constraint. Otherwise a long
     -- chord could shrink on every reflow as its wrapped line gets measured.
     if (layoutState.measureFont) then
-        setWidgetFont(layoutState.measureFont, size);
+        if (face and type(layoutState.measureFont.SetFont) == "function") then
+            pcall(layoutState.measureFont.SetFont, layoutState.measureFont, face, size, flags);
+        else setWidgetFont(layoutState.measureFont, size); end
         layoutState.measureFont:SetText(text);
         font = layoutState.measureFont;
     end
