@@ -34,6 +34,14 @@ on:
         options:
           - '640x480'
           - '320x240'
+      acceptance_suite:
+        description: Disposable real-game acceptance suite
+        required: true
+        type: choice
+        default: gameplay
+        options:
+          - gameplay
+          - confirmation
       expect_frame_guard:
         description: Expect automatic 1x frame protection in this dedicated acceptance run
         required: false
@@ -61,11 +69,13 @@ jobs:
           RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
           STARTUP_SECONDS: ${{ inputs.startup_seconds }}
           GAME_VIEWPORT: ${{ inputs.viewport }}
+          ACCEPTANCE_SUITE: ${{ inputs.acceptance_suite }}
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:RUNTIME_PROFILE -cnotin @('system', 'updated_warp')) { throw 'Invalid runtime profile.' }
           if ($env:STARTUP_SECONDS -cnotmatch '^(?:9[0-9]|[12][0-9]{2}|300)$') { throw 'Scene startup wait must be 90-300 seconds.' }
           if ($env:GAME_VIEWPORT -cnotin @('640x480', '320x240')) { throw 'Invalid game viewport.' }
+          if ($env:ACCEPTANCE_SUITE -cnotin @('gameplay', 'confirmation')) { throw 'Invalid acceptance suite.' }
           if ($env:BUNDLE_SHA256 -ne '' -or $env:BUNDLE_BYTES -ne '') {
             if ($env:BUNDLE_SHA256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Invalid private bundle digest.' }
             if ($env:BUNDLE_BYTES -cnotmatch '^[1-9][0-9]{0,9}$' -or [long]$env:BUNDLE_BYTES -ge 2GB) { throw 'Invalid private bundle byte count.' }
@@ -155,19 +165,30 @@ jobs:
           AZSG_GAME_BUNDLE_BYTES: ${{ inputs.bundle_bytes }}
           AZSG_CAPTURE_PANIC: '1'
           AZSG_CAPTURE_FRAME: '0'
+          AZSG_HOTKEY_ACCEPTANCE: ${{ inputs.acceptance_suite == 'confirmation' && '1' || '' }}
+          AZSG_LAUNCHER_ACCEPTANCE: ${{ inputs.acceptance_suite == 'confirmation' && '1' || '' }}
+          AZSG_CONFIRMATION_ACCEPTANCE: ${{ inputs.acceptance_suite == 'confirmation' && '1' || '' }}
+          AZSG_CONFIRMATION_SPEED100: ${{ inputs.acceptance_suite == 'confirmation' && '100' || '' }}
           AZSG_REMOTE_RUNTIME_DLL_DIR: ${{ env.AZSG_REMOTE_RUNTIME_DLL_DIR }}
           AZSG_REMOTE_RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
           AZSG_STARTUP_SECONDS: ${{ inputs.startup_seconds }}
           AZSG_GAME_VIEWPORT: ${{ inputs.viewport }}
           AZSG_EXPECT_FRAME_GUARD: ${{ inputs.expect_frame_guard && '1' || '0' }}
           WGPU_DX12_COMPILER: ${{ inputs.runtime_profile == 'updated_warp' && 'dxc' || '' }}
-        run: ./tools/remote_game_acceptance.ps1 -PackagePath $env:AZSG_ACCEPTANCE_PACKAGE -OutputPath acceptance/report.json
+        run: |
+          if ($env:AZSG_CONFIRMATION_ACCEPTANCE -eq '1') {
+            ./tools/remote_game_acceptance.ps1 -PackagePath $env:AZSG_ACCEPTANCE_PACKAGE -OutputPath acceptance/confirmation-report.json
+          } else {
+            ./tools/remote_game_acceptance.ps1 -PackagePath $env:AZSG_ACCEPTANCE_PACKAGE -OutputPath acceptance/report.json
+          }
       - name: Retain only our bounded numerical report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: official-game-numerical-report
-          path: acceptance/report.json
+          path: |
+            acceptance/report.json
+            acceptance/confirmation-report.json
           if-no-files-found: warn
           retention-days: 7
       # Never upload/cache a game EXE, RAR, MPQ, screenshot, save or raw game log.

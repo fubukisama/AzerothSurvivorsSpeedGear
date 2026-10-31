@@ -14,7 +14,7 @@ end
 
 local function oracle(actualRate, clientRate, fps, publicationOffset, requestedSpeed100)
     local state = {
-        physical = 0.10, started = 0.10, frame = 0,
+        physical = 0.10, started = 0.10, frame = 0, extraPhysicalOffset = 0,
         game = 100, clock = 1000, rawT = 100, rawUpdated = 1000,
         lastPublication = 0.10, publications = 0, frozen = false,
         actualRate = actualRate, clientRate = clientRate, fps = fps,
@@ -37,9 +37,7 @@ local function oracle(actualRate, clientRate, fps, publicationOffset, requestedS
     });
     assert(meter:RequestSpeed(requestedSpeed100), "oracle request must be accepted");
 
-    function state:tick()
-        self.frame = self.frame + 1;
-        local nextPhysical = self.started + self.frame / self.fps;
+    function state:observe(nextPhysical)
         local elapsed = nextPhysical - self.physical;
         self.game = self.game + self.actualRate * elapsed;
         self.clock = self.clock + self.clientRate * elapsed;
@@ -62,6 +60,16 @@ local function oracle(actualRate, clientRate, fps, publicationOffset, requestedS
         end
         if (self.wasConfirmed and not confirmed) then self.dropTransitions = self.dropTransitions + 1; end
         self.wasConfirmed = confirmed;
+    end
+    function state:tick()
+        self.frame = self.frame + 1;
+        self:observe(self.started + self.frame / self.fps + self.extraPhysicalOffset);
+    end
+    function state:observeElapsed(seconds)
+        -- One delayed UI observation still sees the latest independently timed
+        -- publication. Keep later fixed-cadence ticks monotonic after this gap.
+        self.extraPhysicalOffset = self.extraPhysicalOffset + seconds;
+        self:observe(self.physical + seconds);
     end
     function state:step(seconds)
         local count = math.floor(seconds * self.fps + 0.5);
@@ -170,6 +178,44 @@ if (independentReady) then
         and math.abs(independentMeter.measured - 2) < 0.1,
         "independent client-rate changes do not become an invented simulation rate");
 end
+
+-- A single healthy delayed frame can cross two integer-second boundaries even
+-- though it spans only 1.4 physical seconds. This is not a new run or stale data.
+local hitched, hitchedMeter = oracle(0.5, 0.5, 60, 0.07, 50);
+local hitchReady = hitched:untilState(6, function() return hitchedMeter.confirmedSpeed100 == 50; end);
+check(hitchReady, "half-speed hitch scenario establishes independently measured confirmation first");
+if (hitchReady) then
+    local beforeGap = math.floor(hitched.physical) + 0.70;
+    if (beforeGap <= hitched.physical + 1e-9) then beforeGap = beforeGap + 1; end
+    hitched:step(beforeGap - hitched.physical);
+    check(math.abs(hitched.physical - beforeGap) < 1e-6 and hitchedMeter.confirmedSpeed100 == 50,
+        "half-speed hitch starts at physical fraction .70 while confirmed");
+    local drops = hitched.droppedFrames;
+    local coarseBefore = math.floor(hitched.physical);
+    hitched:observeElapsed(1.40);
+    hitched:describe("single fresh 1.4-second observation gap at half speed");
+    check(math.floor(hitched.physical) - coarseBefore == 2 and hitchedMeter.confirmedSpeed100 == 50,
+        "fresh half-speed progress retains confirmation across a single two-coarse-second boundary gap");
+    hitched:step(10);
+    check(hitchedMeter.confirmedSpeed100 == 50 and hitched.droppedFrames == drops,
+        "ten seconds of fresh half-speed progress after the hitch never flicker to pending");
+    hitched.frozen = true;
+    hitched:observeElapsed(1.40);
+    hitched:observeElapsed(1.40);
+    check(hitchedMeter.confirmedSpeed100 ~= 50 and hitched:confirmationCount(5) == 0,
+        "post-hitch frozen raw packets still revoke confirmation within three physical seconds");
+end
+
+local sparseWrong, sparseWrongMeter = oracle(4, 0.5, 60, 0.07, 50);
+sparseWrong:step(3);
+local wrongBeforeGap = math.floor(sparseWrong.physical) + 0.70;
+if (wrongBeforeGap <= sparseWrong.physical + 1e-9) then wrongBeforeGap = wrongBeforeGap + 1; end
+sparseWrong:step(wrongBeforeGap - sparseWrong.physical);
+sparseWrong:observeElapsed(1.40);
+sparseWrong:step(10);
+sparseWrong:describe("wrong raw 4x versus requested half speed with one observation gap");
+check(sparseWrong.firstConfirmation == nil and sparseWrongMeter.confirmedSpeed100 ~= 50,
+    "a sparse observation cannot confirm independent raw 4x as requested half speed");
 
 print("Confirmation latency regression: " .. checks .. " checks, " .. table.getn(failures) .. " failures.");
 assert(table.getn(failures) == 0, table.concat(failures, "; "));

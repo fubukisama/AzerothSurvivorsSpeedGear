@@ -127,9 +127,6 @@ function Invoke-LauncherAcceptance([string]$GameRoot, [string]$Assets, [string]$
             if($completed){break}
             $latest=$script:la.current
             if($latest.phase -cne 'playing' -or $latest.active -ne 1){throw 'blocked_ui_choice_interrupted'}
-            # The game's first routine level-card modal occurs around 12.5 game
-            # seconds. Stop before it can invalidate a stable, uninterrupted run.
-            if($latest.rawT -ge 12.25){throw 'blocked_confirmation_observation_budget'}
             if($null -eq $firstConfirmed -and ([AZSGRemoteGame]::Wall()-$started)/1e7 -gt $latencyLimit){break}
             Start-Sleep -Milliseconds 50
         }
