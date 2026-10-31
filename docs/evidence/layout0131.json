@@ -1,0 +1,637 @@
+{
+  "schema": 1,
+  "product": "AzerothSurvivorsSpeedGear",
+  "status": "passed",
+  "reason": "native_caption_sizing_details_rebinding_and_restart_passed",
+  "sourceCommit": "ce1f0020f5d7191ab9c761bf7b29594b28fa0b85",
+  "ciRunId": "41214055045",
+  "workflowRepository": "fubukisama/AzerothSurvivorsTestAssets",
+  "gameVersion": "0.131.0",
+  "gameSHA256": "5dd6819d836748ccf809ab76fe6509c9ee793e087939b5d036c430d835a14e63",
+  "gameBytes": 147231744,
+  "rawReportSHA256": "29282dac98d4f871a2ee89e4e0357acc077f82447c25d0fa218ff5fc930abfe9",
+  "reportForm": "Curated numerical summary; not a byte-identical raw report or a full input replay",
+  "scope": "Native font widths, control geometry, physical details clicks, Q/E and rebound key delivery, saved keys after restart. No pixel-rendering or movement/skill-speed certification.",
+  "criteria": [
+    {
+      "name": "session1_playing",
+      "passed": true
+    },
+    {
+      "name": "default_qe_bindings",
+      "passed": true
+    },
+    {
+      "name": "q_slower_playing",
+      "passed": true
+    },
+    {
+      "name": "q_slower_dispatch",
+      "passed": true
+    },
+    {
+      "name": "q_slower_native",
+      "passed": true
+    },
+    {
+      "name": "e_faster_playing",
+      "passed": true
+    },
+    {
+      "name": "e_faster_dispatch",
+      "passed": true
+    },
+    {
+      "name": "e_faster_native",
+      "passed": true
+    },
+    {
+      "name": "e_accelerated_playing",
+      "passed": true
+    },
+    {
+      "name": "e_accelerated_dispatch",
+      "passed": true
+    },
+    {
+      "name": "e_accelerated_native",
+      "passed": true
+    },
+    {
+      "name": "session1_graceful_exit",
+      "passed": true
+    },
+    {
+      "name": "session2_ready",
+      "passed": true
+    },
+    {
+      "name": "configuration_ready",
+      "passed": true
+    },
+    {
+      "name": "ui_launcher_world",
+      "passed": true
+    },
+    {
+      "name": "panel_opened",
+      "passed": true
+    },
+    {
+      "name": "compact_panel_native_geometry",
+      "passed": true
+    },
+    {
+      "name": "native_text_sized_stop",
+      "passed": true
+    },
+    {
+      "name": "native_text_sized_close",
+      "passed": true
+    },
+    {
+      "name": "native_text_sized_down",
+      "passed": true
+    },
+    {
+      "name": "native_text_sized_up",
+      "passed": true
+    },
+    {
+      "name": "ui_detailsButton_world",
+      "passed": true
+    },
+    {
+      "name": "details_expanded",
+      "passed": true
+    },
+    {
+      "name": "ui_detailsButton_world",
+      "passed": true
+    },
+    {
+      "name": "details_collapsed",
+      "passed": true
+    },
+    {
+      "name": "ui_downButton_world",
+      "passed": true
+    },
+    {
+      "name": "record_down_opened",
+      "passed": true
+    },
+    {
+      "name": "record_down_r",
+      "passed": true
+    },
+    {
+      "name": "ui_upButton_world",
+      "passed": true
+    },
+    {
+      "name": "record_up_opened",
+      "passed": true
+    },
+    {
+      "name": "record_up_ctrl_t",
+      "passed": true
+    },
+    {
+      "name": "old_q_binding_restored",
+      "passed": true
+    },
+    {
+      "name": "old_e_binding_restored",
+      "passed": true
+    },
+    {
+      "name": "rebound_layout_native_geometry",
+      "passed": true
+    },
+    {
+      "name": "ui_closeButton_world",
+      "passed": true
+    },
+    {
+      "name": "panel_hidden",
+      "passed": true
+    },
+    {
+      "name": "configured_ready",
+      "passed": true
+    },
+    {
+      "name": "configured_playing",
+      "passed": true
+    },
+    {
+      "name": "r_slower_playing",
+      "passed": true
+    },
+    {
+      "name": "r_slower_dispatch",
+      "passed": true
+    },
+    {
+      "name": "r_slower_native",
+      "passed": true
+    },
+    {
+      "name": "ctrl_t_faster_playing",
+      "passed": true
+    },
+    {
+      "name": "ctrl_t_faster_dispatch",
+      "passed": true
+    },
+    {
+      "name": "ctrl_t_faster_native",
+      "passed": true
+    },
+    {
+      "name": "session2_graceful_exit",
+      "passed": true
+    },
+    {
+      "name": "saved_custom_keys",
+      "passed": true
+    },
+    {
+      "name": "session3_ready",
+      "passed": true
+    },
+    {
+      "name": "reloaded_custom_bindings",
+      "passed": true
+    },
+    {
+      "name": "ui_launcher_world",
+      "passed": true
+    },
+    {
+      "name": "reloaded_panel_opened",
+      "passed": true
+    },
+    {
+      "name": "ui_closeButton_world",
+      "passed": true
+    },
+    {
+      "name": "reloaded_panel_hidden",
+      "passed": true
+    },
+    {
+      "name": "reloaded_ready",
+      "passed": true
+    },
+    {
+      "name": "reloaded_playing",
+      "passed": true
+    },
+    {
+      "name": "reloaded_r_slower_playing",
+      "passed": true
+    },
+    {
+      "name": "reloaded_r_slower_dispatch",
+      "passed": true
+    },
+    {
+      "name": "reloaded_r_slower_native",
+      "passed": true
+    },
+    {
+      "name": "reloaded_ctrl_t_faster_playing",
+      "passed": true
+    },
+    {
+      "name": "reloaded_ctrl_t_faster_dispatch",
+      "passed": true
+    },
+    {
+      "name": "reloaded_ctrl_t_faster_native",
+      "passed": true
+    },
+    {
+      "name": "session3_graceful_exit",
+      "passed": true
+    }
+  ],
+  "cases": {
+    "compact_panel_native_geometry": {
+      "fileTime": 134379335876407303,
+      "seq": 76,
+      "instance": 1793459961365,
+      "phase": "ready",
+      "desired": 100,
+      "speed": 100,
+      "guard": 0,
+      "active": 0,
+      "down": "Q",
+      "up": "E",
+      "q": "AZSG_SLOWER",
+      "e": "AZSG_FASTER",
+      "r": "REPLY",
+      "ctrlT": "TOGGLECOLLISIONDISPLAY",
+      "capture": 0,
+      "panel": 1,
+      "actions": 0,
+      "direction": 0,
+      "before": 100,
+      "after": 100,
+      "accepted": 0,
+      "frames": 75,
+      "rawT": 0.0,
+      "chat": 0,
+      "menu": 0,
+      "launcher": [
+        0.950342,
+        0.40625
+      ],
+      "downButton": [
+        0.394092,
+        0.579687
+      ],
+      "upButton": [
+        0.473193,
+        0.579687
+      ],
+      "closeButton": [
+        0.617773,
+        0.358203
+      ],
+      "stopButton": [
+        0.410791,
+        0.639453
+      ],
+      "captureKey": "none",
+      "captureCtrl": "none",
+      "captureShift": "none",
+      "captureAlt": "none",
+      "currentCtrl": "nil_nil",
+      "captureEvents": 0,
+      "originalQ": "STRAFELEFT",
+      "originalE": "STRAFERIGHT",
+      "panelWidth": 360.0,
+      "panelHeight": 294.0,
+      "stopWidth": 125.0,
+      "stopTextWidth": 100.8,
+      "closeWidth": 60.0,
+      "closeTextWidth": 35.2,
+      "downWidth": 87.0,
+      "downTextWidth": 62.4,
+      "upWidth": 77.0,
+      "upTextWidth": 52.8,
+      "boundsViolations": 0.0,
+      "overlaps": 0.0,
+      "detailsShown": 0.0,
+      "detailsButton": [
+        0.608984,
+        0.639453
+      ]
+    },
+    "details_expanded": {
+      "fileTime": 134379335898613406,
+      "seq": 83,
+      "instance": 1793459961365,
+      "phase": "ready",
+      "desired": 100,
+      "speed": 100,
+      "guard": 0,
+      "active": 0,
+      "down": "Q",
+      "up": "E",
+      "q": "AZSG_SLOWER",
+      "e": "AZSG_FASTER",
+      "r": "REPLY",
+      "ctrlT": "TOGGLECOLLISIONDISPLAY",
+      "capture": 0,
+      "panel": 1,
+      "actions": 0,
+      "direction": 0,
+      "before": 100,
+      "after": 100,
+      "accepted": 0,
+      "frames": 82,
+      "rawT": 0.0,
+      "chat": 0,
+      "menu": 0,
+      "launcher": [
+        0.950342,
+        0.40625
+      ],
+      "downButton": [
+        0.394092,
+        0.535156
+      ],
+      "upButton": [
+        0.473193,
+        0.535156
+      ],
+      "closeButton": [
+        0.617773,
+        0.313672
+      ],
+      "stopButton": [
+        0.410791,
+        0.594922
+      ],
+      "captureKey": "none",
+      "captureCtrl": "none",
+      "captureShift": "none",
+      "captureAlt": "none",
+      "currentCtrl": "nil_nil",
+      "captureEvents": 0,
+      "originalQ": "STRAFELEFT",
+      "originalE": "STRAFERIGHT",
+      "panelWidth": 360.0,
+      "panelHeight": 370.0,
+      "stopWidth": 125.0,
+      "stopTextWidth": 100.8,
+      "closeWidth": 60.0,
+      "closeTextWidth": 35.2,
+      "downWidth": 87.0,
+      "downTextWidth": 62.4,
+      "upWidth": 77.0,
+      "upTextWidth": 52.8,
+      "boundsViolations": 0.0,
+      "overlaps": 0.0,
+      "detailsShown": 1.0,
+      "detailsButton": [
+        0.609863,
+        0.594922
+      ]
+    },
+    "details_collapsed": {
+      "fileTime": 134379335917787760,
+      "seq": 89,
+      "instance": 1793459961365,
+      "phase": "ready",
+      "desired": 100,
+      "speed": 100,
+      "guard": 0,
+      "active": 0,
+      "down": "Q",
+      "up": "E",
+      "q": "AZSG_SLOWER",
+      "e": "AZSG_FASTER",
+      "r": "REPLY",
+      "ctrlT": "TOGGLECOLLISIONDISPLAY",
+      "capture": 0,
+      "panel": 1,
+      "actions": 0,
+      "direction": 0,
+      "before": 100,
+      "after": 100,
+      "accepted": 0,
+      "frames": 88,
+      "rawT": 0.0,
+      "chat": 0,
+      "menu": 0,
+      "launcher": [
+        0.950342,
+        0.40625
+      ],
+      "downButton": [
+        0.394092,
+        0.579687
+      ],
+      "upButton": [
+        0.473193,
+        0.579687
+      ],
+      "closeButton": [
+        0.617773,
+        0.358203
+      ],
+      "stopButton": [
+        0.410791,
+        0.639453
+      ],
+      "captureKey": "none",
+      "captureCtrl": "none",
+      "captureShift": "none",
+      "captureAlt": "none",
+      "currentCtrl": "nil_nil",
+      "captureEvents": 0,
+      "originalQ": "STRAFELEFT",
+      "originalE": "STRAFERIGHT",
+      "panelWidth": 360.0,
+      "panelHeight": 294.0,
+      "stopWidth": 125.0,
+      "stopTextWidth": 100.8,
+      "closeWidth": 60.0,
+      "closeTextWidth": 35.2,
+      "downWidth": 87.0,
+      "downTextWidth": 62.4,
+      "upWidth": 77.0,
+      "upTextWidth": 52.8,
+      "boundsViolations": 0.0,
+      "overlaps": 0.0,
+      "detailsShown": 0.0,
+      "detailsButton": [
+        0.608984,
+        0.639453
+      ]
+    },
+    "rebound_layout_native_geometry": {
+      "fileTime": 134379335977979416,
+      "seq": 111,
+      "instance": 1793459961365,
+      "phase": "ready",
+      "desired": 100,
+      "speed": 100,
+      "guard": 0,
+      "active": 0,
+      "down": "R",
+      "up": "CTRL-T",
+      "q": "STRAFELEFT",
+      "e": "STRAFERIGHT",
+      "r": "AZSG_SLOWER",
+      "ctrlT": "AZSG_FASTER",
+      "capture": 0,
+      "panel": 1,
+      "actions": 0,
+      "direction": 0,
+      "before": 100,
+      "after": 100,
+      "accepted": 0,
+      "frames": 107,
+      "rawT": 0.0,
+      "chat": 0,
+      "menu": 0,
+      "launcher": [
+        0.950342,
+        0.40625
+      ],
+      "downButton": [
+        0.393213,
+        0.579687
+      ],
+      "upButton": [
+        0.487256,
+        0.579687
+      ],
+      "closeButton": [
+        0.617773,
+        0.358203
+      ],
+      "stopButton": [
+        0.410791,
+        0.639453
+      ],
+      "captureKey": "T",
+      "captureCtrl": "number_1",
+      "captureShift": "nil_nil",
+      "captureAlt": "nil_nil",
+      "currentCtrl": "number_1",
+      "captureEvents": 3,
+      "originalQ": "STRAFELEFT",
+      "originalE": "STRAFERIGHT",
+      "panelWidth": 360.0,
+      "panelHeight": 294.0,
+      "stopWidth": 125.0,
+      "stopTextWidth": 100.8,
+      "closeWidth": 60.0,
+      "closeTextWidth": 35.2,
+      "downWidth": 85.0,
+      "downTextWidth": 59.2,
+      "upWidth": 113.0,
+      "upTextWidth": 86.4,
+      "boundsViolations": 0.0,
+      "overlaps": 0.0,
+      "detailsShown": 0.0,
+      "detailsButton": [
+        0.608984,
+        0.639453
+      ]
+    },
+    "reloaded_custom_bindings": {
+      "fileTime": 134379336920631777,
+      "seq": 65,
+      "instance": 1793460059609,
+      "phase": "ready",
+      "desired": 100,
+      "speed": 100,
+      "guard": 0,
+      "active": 0,
+      "down": "R",
+      "up": "CTRL-T",
+      "q": "STRAFELEFT",
+      "e": "STRAFERIGHT",
+      "r": "AZSG_SLOWER",
+      "ctrlT": "AZSG_FASTER",
+      "capture": 0,
+      "panel": 0,
+      "actions": 0,
+      "direction": 0,
+      "before": 100,
+      "after": 100,
+      "accepted": 0,
+      "frames": 64,
+      "rawT": 0.0,
+      "chat": 0,
+      "menu": 0,
+      "launcher": [
+        0.950342,
+        0.40625
+      ],
+      "downButton": [
+        0.392773,
+        0.579687
+      ],
+      "upButton": [
+        0.485498,
+        0.579687
+      ],
+      "closeButton": [
+        0.617773,
+        0.358203
+      ],
+      "stopButton": [
+        0.410791,
+        0.639453
+      ],
+      "captureKey": "none",
+      "captureCtrl": "none",
+      "captureShift": "none",
+      "captureAlt": "none",
+      "currentCtrl": "nil_nil",
+      "captureEvents": 0,
+      "originalQ": "none",
+      "originalE": "none",
+      "panelWidth": 360.0,
+      "panelHeight": 294.0,
+      "stopWidth": 125.0,
+      "stopTextWidth": 100.8,
+      "closeWidth": 60.0,
+      "closeTextWidth": 35.2,
+      "downWidth": 84.0,
+      "downTextWidth": 59.2,
+      "upWidth": 111.0,
+      "upTextWidth": 86.4,
+      "boundsViolations": 0.0,
+      "overlaps": 0.0,
+      "detailsShown": 0.0,
+      "detailsButton": [
+        0.608984,
+        0.639453
+      ]
+    }
+  },
+  "sessions": [
+    {
+      "number": 1,
+      "gracefulExit": true
+    },
+    {
+      "number": 2,
+      "gracefulExit": true
+    },
+    {
+      "number": 3,
+      "gracefulExit": true
+    }
+  ]
+}

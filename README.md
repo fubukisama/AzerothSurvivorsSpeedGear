@@ -1,5 +1,11 @@
 # AzerothSurvivorsSpeedGear
 
+Version 0.7.4 replaces the oversized panel with a compact layout. Buttons fit
+their localized text with consistent padding and reflow for long key chords.
+Diagnostics expand on demand; the restore button has a normal caption-sized
+width. The selected preset is highlighted, and both draggable controls keep
+their saved positions.
+
 Version 0.7.3 measures fresh raw publications against independent wall-clock
 seconds in a continuously updated bounded window. Confirmation no longer clears
 its own evidence or repeatedly restarts after twelve seconds. Confidence still

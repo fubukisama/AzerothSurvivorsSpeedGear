@@ -2,7 +2,7 @@
 param([string]$Configuration = 'Release')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$version = '0.7.3'
+$version = '0.7.4'
 $package = Join-Path $root ('dist\AZSSpeedGear-' + $version + '-Windows-x64')
 if (Test-Path -LiteralPath $package) { throw 'Package folder already exists; use a new clean output directory.' }
 foreach ($directory in @('AddOns','Native','scripts','docs','licenses')) {
@@ -36,7 +36,7 @@ if (Test-Path -LiteralPath (Join-Path $root 'docs\VALIDATION.md')) { Copy-Item -
 Copy-Item -LiteralPath (Join-Path $root 'docs\SPEEDINVESTIGATION.md') -Destination (Join-Path $package 'docs\SPEEDINVESTIGATION.md')
 New-Item -ItemType Directory -Path (Join-Path $package 'docs\evidence') -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'docs\evidence\frameguard0131.json') -Destination (Join-Path $package 'docs\evidence\frameguard0131.json')
-foreach ($name in @('hotkeys0131raw.json', 'hotkeys0131.json', 'launcher0131.json', 'confirmation0131.json')) {
+foreach ($name in @('hotkeys0131raw.json', 'hotkeys0131.json', 'launcher0131.json', 'confirmation0131.json', 'layout0131.json')) {
     Copy-Item -LiteralPath (Join-Path $root ('docs\evidence\' + $name)) -Destination (Join-Path $package ('docs\evidence\' + $name))
 }
 Copy-Item -LiteralPath (Join-Path $root 'third_party\azs-speed-controller\LICENSE') -Destination (Join-Path $package 'licenses\AZS-Speed-Controller-MIT.txt')

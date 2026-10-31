@@ -1,4 +1,48 @@
-# Validation — updated 2026-10-31
+# Validation — updated 2026-11-01
+
+## Version 0.7.4 compact localized panel
+
+The panel uses native localized font measurements plus consistent padding for
+button sizes. An unconstrained hidden measuring label prevents wrapped text
+from shrinking a button on subsequent layout passes. Width measurements are
+bounded and cached; hidden panels defer reflow, and dragging defers resizing.
+Rows wrap for long key chords and narrow viewports. Diagnostic text expands
+below the controls instead of occupying the main layout. The restore button
+is a normal text-sized action. Native preset highlighting follows the request.
+
+The production UI fixture uses distinct native-font metric stubs and checks
+all fourteen languages for visible-control bounds, nonoverlap, text fit,
+detail expansion/collapse, long-chord growth and reset shrinkage, and a narrow
+viewport. Real-game acceptance also records independent native text widths and
+button geometry, and physically clicks the details toggle before rebinding.
+
+Remote run
+[41210779285](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41210779285)
+failed the caption-sized restore/close regression against the old stretched
+panel. Run
+[41214059338](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41214059338)
+passed all 28 Windows/Lua 5.0 checks with the new layout, actual-font style
+override and fourteen-language fixture checks.
+
+Private real-game run `41214055045`, runtime source `ce1f002`, passed all 61
+criteria and all three normal exits on game 0.131.0. The
+[curated numerical summary](evidence/layout0131.json) records a 360x294 panel,
+125-unit restore button around 100.8 units of native text, and a 60-unit close
+button around 35.2 units of text. Control bounds, overlaps and observed button
+text height all passed. Physical clicks expanded and collapsed Details. R and
+Ctrl+T were recorded, delivered native 0.5x/1x requests, saved, then loaded and
+used again after restart. Default Q/E and the guarded 2x request also passed.
+
+The independent measurement-label and displayed-font contexts differed by up
+to 2.6 UI units after rebinding in two preceding captures. Native acceptance
+therefore checks bounded 20-28-unit padding (or the 44-unit minimum hit area),
+not exact rounding equality; it still rejects the old full-width restore button.
+The deterministic font fixture checks the nominal 24-unit padding exactly.
+The summary identifies its original full private report by SHA-256
+`29282dac98d4f871a2ee89e4e0357acc077f82447c25d0fa218ff5fc930abfe9`;
+it is not a full raw replay. These are runtime text/geometry and input checks,
+not fresh pixel-screenshot acceptance or new movement/skill-speed certification.
+The private game bundle was reused, and no local game test was performed.
 
 ## Version 0.7.3 continuous measured confirmation
 

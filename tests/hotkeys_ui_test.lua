@@ -33,10 +33,38 @@ local function invoke(frame, script, argument)
     this, arg1 = previousThis, previousArg;
 end
 
-local function frameStub(name)
-    local frame = { shown = true, scripts = {}, fontStrings = {}, events = {}, keyboard = false };
+local function frameStub(name, kind, parent)
+    local frame = { shown = true, scripts = {}, fontStrings = {}, events = {}, keyboard = false, kind = kind, parent = parent };
     function frame:SetWidth(value) self.width = value; end
     function frame:SetHeight(value) self.height = value; end
+    function frame:GetWidth() return self.width; end
+    function frame:GetHeight() return self.height; end
+    function frame:SetFont(face, size) self.fontFace, self.fontSize = face, size; end
+    function frame:GetFont() return self.fontFace or "fixture-font", self.fontSize or 12, ""; end
+    function frame:GetFontString()
+        if (self.kind ~= "Button") then return nil; end
+        if (not self.buttonFont) then
+            self.buttonFont = frameStub(nil, "ButtonFont", self);
+        end
+        return self.buttonFont;
+    end
+    function frame:GetStringWidth()
+        local value, width = self:GetText() or "", 0;
+        local size = self.fontSize or 12;
+        for index = 1, string.len(value) do
+            local byte = string.byte(value, index);
+            -- Deliberately different from production's no-metrics fallback.
+            if (byte < 128) then width = width + size * 0.51;
+            elseif (byte >= 224) then width = width + size;
+            elseif (byte >= 192) then width = width + size * 0.63; end
+        end
+        if (self.fontFace == "fixture-alternate") then width = width * 1.27; end
+        return width;
+    end
+    function frame:GetStringHeight()
+        local lines = math.max(1, math.ceil(self:GetStringWidth() / math.max(1, self.width or 10000)));
+        return lines * (self.fontSize or 12) * 1.15;
+    end
     function frame:SetPoint(point, relative, relativePoint, x, y)
         self.point, self.relative, self.relativePoint, self.x, self.y = point, relative, relativePoint, x, y;
     end
@@ -52,7 +80,10 @@ local function frameStub(name)
     function frame:SetBackdropColor() end
     function frame:SetJustifyH() end
     function frame:SetText(value) self.text = value; end
-    function frame:GetText() return self.text; end
+    function frame:GetText()
+        if (self.kind == "ButtonFont") then return self.parent.text; end
+        return self.text;
+    end
     function frame:SetScript(script, callback) self.scripts[script] = callback; end
     function frame:RegisterEvent(name) self.events[name] = true; end
     function frame:StartMoving() end
@@ -68,7 +99,7 @@ local function frameStub(name)
     end
     function frame:IsShown() return self.shown; end
     function frame:CreateFontString()
-        local font = frameStub();
+        local font = frameStub(nil, "FontString", self);
         table.insert(self.fontStrings, font);
         return font;
     end
@@ -77,7 +108,9 @@ local function frameStub(name)
 end
 
 UIParent = frameStub("UIParent");
-CreateFrame = function(kind, name) return frameStub(name); end;
+UIParent:SetWidth(960); UIParent:SetHeight(540);
+GameFontNormal = frameStub("GameFontNormal", "Font");
+CreateFrame = function(kind, name, parent) return frameStub(name, kind, parent); end;
 RegisterCVar = function(name, value) if (not cvars[name]) then cvars[name] = value; end end;
 SetCVar = function(name, value) cvars[name] = value; table.insert(writes, value); end;
 ConsoleExec = function() return true; end;
@@ -152,6 +185,8 @@ end
 
 check(same(bindings, originals), "loading addon source leaves the base key map unchanged");
 fire("ADDON_LOADED", "AZSSpeedGear");
+check(frames.AZSSpeedGearStop.width < 180 and frames.AZSSpeedGearClose.width < 90,
+    "restore and close buttons must fit their captions instead of stretching across the panel");
 check(same(bindings, originals) and not AZSSpeedGear.hotkeys.active,
     "saved-variable loading before world entry does not override game keys");
 check(AZSSpeedGearDB.hotkeyDown == "Q" and AZSSpeedGearDB.hotkeyUp == "E",
@@ -315,6 +350,39 @@ check(not AZSSpeedGear.panel.keyboard, "reopening the panel does not resume stal
 
 -- Refresh existing widgets in every supported language without rebuilding them.
 local downButton, upButton, resetButton = frames.AZSSpeedGearHotkeyDown, frames.AZSSpeedGearHotkeyUp, frames.AZSSpeedGearHotkeyReset;
+local function checkPanelLayout(context)
+    local w, panel = AZSSpeedGear.panelWidgets, AZSSpeedGear.panel;
+    local widgets = { w.title, w.close, w.status, w.measurement, w.customLabel, w.customBox, w.apply,
+        w.stop, w.hotkeyTitle, w.down, w.up, w.reset, w.hotkeyHint, w.notice, w.details, w.sending, w.commands, w.hint };
+    for _, button in ipairs(w.presets) do table.insert(widgets, button); end
+    local rectangles = {};
+    for _, widget in ipairs(widgets) do
+        if (widget:IsShown()) then
+            check(widget.point == "TOPLEFT" and widget.relative == panel and widget.x >= 14 and -widget.y >= 12
+                and widget.x + widget.width <= panel.width - 14 + 0.01
+                and -widget.y + widget.height <= panel.height - 12 + 0.01,
+                context .. " keeps each visible control inside the panel: " .. tostring(widget:GetText()));
+            local font = widget:GetFontString();
+            if (font) then
+                local natural = font:GetStringWidth();
+                local expected = math.min(panel.width - 32, math.max(44, math.ceil(natural + 24)));
+                check(math.abs(widget.width - expected) < 0.01,
+                    context .. " fits each button to native text metrics and padding: " .. tostring(widget:GetText()));
+                check(font:GetStringHeight() <= widget.height - 8 + 0.01,
+                    context .. " leaves enough height for button text");
+            elseif (widget.kind == "FontString") then
+                check(widget:GetStringHeight() <= widget.height + 0.01, context .. " wraps label text without clipping");
+            end
+            for _, previous in ipairs(rectangles) do
+                local intersectionWidth = math.min(widget.x + widget.width, previous.x + previous.width) - math.max(widget.x, previous.x);
+                local intersectionHeight = math.min(-widget.y + widget.height, -previous.y + previous.height) - math.max(-widget.y, -previous.y);
+                check(intersectionWidth <= 0.01 or intersectionHeight <= 0.01,
+                    context .. " controls do not overlap: " .. tostring(widget:GetText()) .. " / " .. tostring(previous:GetText()));
+            end
+            table.insert(rectangles, widget);
+        end
+    end
+end
 for code, catalog in pairs(AZSSpeedGearI18n.catalogs) do
     AZSSpeedGearNativeLocale = code;
     wall = wall + 1;
@@ -322,7 +390,41 @@ for code, catalog in pairs(AZSSpeedGearI18n.catalogs) do
     check(downButton.text == string.format(catalog.hotkey_down, "Q")
         and upButton.text == string.format(catalog.hotkey_up, "E") and resetButton.text == catalog.hotkey_reset,
         "existing hotkey buttons follow game language " .. code);
+    check(not AZSSpeedGear.panelWidgets.sending:IsShown() and not AZSSpeedGear.panelWidgets.commands:IsShown(),
+        "diagnostic information starts collapsed " .. code);
+    checkPanelLayout(code .. " compact");
+    local compactHeight = AZSSpeedGear.panel.height;
+    click("AZSSpeedGearDetails");
+    check(AZSSpeedGear.panelWidgets.sending:IsShown() and AZSSpeedGear.panel.height > compactHeight,
+        "details expands the panel without covering other controls " .. code);
+    checkPanelLayout(code .. " expanded");
+    click("AZSSpeedGearDetails");
+    check(AZSSpeedGear.panel.height == compactHeight, "closing details restores compact height " .. code);
 end
+AZSSpeedGearNativeLocale = "zh"; wall = wall + 1; invoke(driver, "OnUpdate");
+check(AZSSpeedGear.panel.width <= 380 and AZSSpeedGear.panel.height <= 360
+    and frames.AZSSpeedGearStop.width < 180 and frames.AZSSpeedGearClose.width < 90,
+    "Chinese panel and action buttons no longer occupy the old 560x432 stretched layout");
+local narrowKeyWidth = downButton.width;
+click("AZSSpeedGearHotkeyDown");
+modifiers.alt, modifiers.ctrl, modifiers.shift = true, true, true; press("F12");
+modifiers.alt, modifiers.ctrl, modifiers.shift = false, false, false;
+check(downButton.width > narrowKeyWidth, "recording a long chord grows the button to fit its text");
+checkPanelLayout("long custom chord");
+click("AZSSpeedGearHotkeyReset");
+check(downButton.width == narrowKeyWidth, "resetting Q/E shrinks the button again");
+-- A native button's current style can differ from GameFontNormal. The sizer
+-- must copy that face/size and invalidate the old metric, not assume the default.
+downButton:GetFontString():SetFont("fixture-alternate", 12);
+click("AZSSpeedGearHotkeyReset");
+SlashCmdList.AZSSPEEDGEAR("show");
+checkPanelLayout("native button font override");
+downButton:GetFontString():SetFont("fixture-font", 11);
+click("AZSSpeedGearHotkeyReset");
+SlashCmdList.AZSSPEEDGEAR("show");
+UIParent:SetWidth(320); SlashCmdList.AZSSPEEDGEAR("show");
+checkPanelLayout("narrow viewport");
+UIParent:SetWidth(960); SlashCmdList.AZSSPEEDGEAR("show");
 check(AZSSpeedGearDB.hotkeyDown == "Q" and AZSSpeedGearDB.hotkeyUp == "E" and same(bindings, liveBindings),
     "language refresh preserves custom settings and binding ownership");
 
