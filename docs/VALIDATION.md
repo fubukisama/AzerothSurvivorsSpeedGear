@@ -1,5 +1,23 @@
 # Validation — updated 2026-10-31
 
+## Version 0.6.3 frame-interval protection
+
+The old controller failed the new remote
+[Lua50FrameGuard regression](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41175105454):
+an independent 5 Hz callback stream, 2x client clock and 2x raw simulation
+continued requesting 2x despite 400ms client-frame intervals. The corresponding
+250ms-capped movement oracle advances only 1.25x. The regression also covers
+manual retry, no automatic re-acceleration, brief hitches, the exact boundary,
+pause/choice transitions, unusable clocks and a failed restoration transport.
+
+The full-game data and scope are recorded in the
+[speed investigation](SPEEDINVESTIGATION.md). Normal 2x gameplay acceptance and
+automatic-protection acceptance use separate verdicts. A successful restoration
+test must observe the real controller's latch, effective 1x request, a later
+native 1x receipt and normal post-guard simulation/cooldown rates. It cannot be
+reported as successful 2x movement. Builds, automated regressions and real-game
+tests remain remote-only.
+
 ## Version 0.6.2 speed measurement and licensing
 
 The pre-fix remote run

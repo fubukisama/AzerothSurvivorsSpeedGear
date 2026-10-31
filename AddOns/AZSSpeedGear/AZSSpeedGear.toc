@@ -15,7 +15,7 @@
 ## X-AZSG-Notes-ru: Управление скоростью в одиночной игре; требуется нативный компонент AzerothSurvivorsSpeedGear.
 ## X-AZSG-Notes-uk: Керування швидкістю в одиночній грі; потрібен нативний компонент AzerothSurvivorsSpeedGear.
 ## X-AZSG-Notes-ko: 싱글 플레이 배속 조절; AzerothSurvivorsSpeedGear 네이티브 구성 요소가 필요합니다.
-## Version: 0.6.2
+## Version: 0.6.3
 ## Author: AzerothSurvivorsSpeedGear contributors
 ## SavedVariables: AZSSpeedGearDB
 

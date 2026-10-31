@@ -1,5 +1,11 @@
 # AzerothSurvivorsSpeedGear
 
+Version 0.6.3 adds low-frame-rate protection. While accelerating, three consecutive
+client frame intervals above 250 ms request a return to 1x and show a localized
+notice. The request stays at 1x until you choose a speed again; it does not
+oscillate automatically as performance changes. An isolated hitch is ignored.
+This preserves the engine's physics protection rather than removing its step cap.
+
 Version 0.6.2 corrects a false speed-confirmation case caused by coarse wall
 clock sampling. Confirmation observes raw run snapshots, rather than the
 interpolated display getter, and waits for a sufficiently bounded observation.

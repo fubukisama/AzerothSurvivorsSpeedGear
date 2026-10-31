@@ -6,6 +6,10 @@ local function tr(key) return I18n.Text(key); end
 local COMMAND_CVAR = "AZSSpeedGearCommand";
 local MIN_SPEED = 25;
 local MAX_SPEED = 1000;
+-- Current engine movement time is capped at 250ms per client update. Three
+-- consecutive over-budget updates are evidence, unlike a single loading hitch.
+local FRAME_STEP_LIMIT = 0.25;
+local FRAME_GUARD_COUNT = 3;
 
 local function finiteNumber(value)
     return type(value) == "number" and value == value and value > -1e100 and value < 1e100;
@@ -57,6 +61,9 @@ function Gear.NewController(api)
     self.sendStatus = "unavailable";
     self.writeFailed = false;
     self.initialized = false;
+    self.frameGuardTripped = false;
+    self.frameGuardClock = nil;
+    self.frameGuardSlowFrames = 0;
 
     local now = safeCall(api.now);
     local random = safeCall(api.random);
@@ -90,6 +97,40 @@ function Gear.NewController(api)
         self.measureStart = nil;
         self.measureRun = nil;
         self.previousRun = nil;
+    end
+
+    function self:ResetFrameGuardObservation(clock)
+        self.frameGuardClock = nil;
+        if (finiteNumber(clock) and clock > 0) then self.frameGuardClock = clock; end
+        self.frameGuardSlowFrames = 0;
+    end
+
+    function self:ObserveFrameGuard(clock)
+        if (not self.active or self.speed100 <= 100) then
+            self:ResetFrameGuardObservation(clock);
+            return false;
+        end
+        if (not finiteNumber(clock) or clock <= 0) then
+            self:ResetFrameGuardObservation();
+            return false;
+        end
+        local previous = self.frameGuardClock;
+        self.frameGuardClock = clock;
+        if (not finiteNumber(previous) or clock <= previous) then
+            -- A repeated, missing or corrected clock is not a slow-frame sample.
+            self.frameGuardSlowFrames = 0;
+            return false;
+        end
+        if (clock - previous > FRAME_STEP_LIMIT) then
+            self.frameGuardSlowFrames = self.frameGuardSlowFrames + 1;
+        else self.frameGuardSlowFrames = 0; end
+        if (self.frameGuardSlowFrames < FRAME_GUARD_COUNT) then return false; end
+        self.speed100 = 100;
+        self.desiredSpeed100 = 100;
+        self.frameGuardTripped = true;
+        self:ResetFrameGuardObservation(clock);
+        self:ResetMeasurement();
+        return true;
     end
 
     function self:Emit(now)
@@ -128,12 +169,12 @@ function Gear.NewController(api)
         return ok and result ~= false;
     end
 
-    function self:Measure(now)
+    function self:Measure(now, clock, sampledClock)
         local sample = safeCall(self.api.rawRunSample);
         if (not now or type(sample) ~= "table" or not finiteNumber(sample.t) or sample.t < 0
             or not finiteNumber(sample.updated) or sample.updated < 0) then self:ResetMeasurement(); return; end
         local run, updated = sample.t, sample.updated;
-        local clock = safeCall(self.api.clientClock);
+        if (not sampledClock) then clock = safeCall(self.api.clientClock); end
         local hasClock = finiteNumber(clock) and clock >= updated;
         if (self.rawRunValue ~= run or self.rawRunUpdated ~= updated) then
             if (self.rawRunValue and run < self.rawRunValue) then self:ResetMeasurement(); end
@@ -214,21 +255,33 @@ function Gear.NewController(api)
         self.solo = safeCall(self.api.isSolo);
         local newRun = self.phase == "ready" or self.phase == "dead" or self.phase == "victory";
         local run = safeCall(self.api.runTime);
+        local clock = safeCall(self.api.clientClock);
         if (newRun) then
             self.lastObservedRun = nil;
         elseif (finiteNumber(run) and run >= 0 and (self.phase == "playing" or self.phase == "paused" or self.phase == "choosing")) then
             if (self.lastObservedRun and run + 1 < self.lastObservedRun) then newRun = true; end
             self.lastObservedRun = run;
         end
-        if (newRun) then self.desiredSpeed100 = 100; end
+        if (newRun) then
+            self.desiredSpeed100 = 100;
+            self.frameGuardTripped = false;
+            self:ResetFrameGuardObservation();
+        end
         local allowed = self.bridgeReady and now ~= nil and self.phase == "playing" and self.solo == true;
-        if (not self.initialized or allowed ~= self.active or (allowed and self.speed100 ~= self.desiredSpeed100)) then
+        local changed = not self.initialized or allowed ~= self.active or (allowed and self.speed100 ~= self.desiredSpeed100);
+        if (changed) then
             self.initialized = true;
             self.active = allowed;
             -- Choices and pause suspend the request while retaining this run's setting.
             -- A new run, explicit stop or world exit resets that setting to one.
             self.speed100 = allowed and self.desiredSpeed100 or 100;
             self:ResetMeasurement();
+            self:ResetFrameGuardObservation(clock);
+        end
+        -- GetTime already includes the applied client-clock scale. Never divide
+        -- by the selected rate to invent FPS; movement consumes this frame step.
+        local frameRestored = self:ObserveFrameGuard(clock);
+        if (changed or frameRestored) then
             self:Emit(now);
         elseif (self.bridgeReady and now and (not self.lastSent or now < self.lastSent or now - self.lastSent >= 5)) then
             self:Emit(now);
@@ -237,7 +290,8 @@ function Gear.NewController(api)
         end
         -- The smooth getter above detects run boundaries only. Measure reads a
         -- separate raw publication and never measures client interpolation.
-        if (self.active) then self:Measure(now); else self:ResetMeasurement(); end
+        if (self.active and not frameRestored) then self:Measure(now, clock, true);
+        elseif (not self.active) then self:ResetMeasurement(); end
     end
 
     function self:RequestSpeed(value)
@@ -245,10 +299,13 @@ function Gear.NewController(api)
         if (not finiteNumber(value) or value < MIN_SPEED or value > MAX_SPEED or not self.active) then return false; end
         self.speed100 = math.floor(value + 0.5);
         self.desiredSpeed100 = self.speed100;
+        self.frameGuardTripped = false;
+        local clock = safeCall(self.api.clientClock);
+        self:ResetFrameGuardObservation(clock);
         self:ResetMeasurement();
         local now = self:RealTime();
         local emitted = self:Emit(now);
-        if (self.active) then self:Measure(now); end
+        if (self.active) then self:Measure(now, clock, true); end
         return emitted;
     end
 
@@ -256,10 +313,13 @@ function Gear.NewController(api)
         self:Update();
         self.speed100 = 100;
         self.desiredSpeed100 = 100;
+        self.frameGuardTripped = false;
+        local clock = safeCall(self.api.clientClock);
+        self:ResetFrameGuardObservation(clock);
         self:ResetMeasurement();
         local now = self:RealTime();
         local emitted = self:Emit(now);
-        if (self.active) then self:Measure(now); end
+        if (self.active) then self:Measure(now, clock, true); end
         return emitted;
     end
 
@@ -268,6 +328,8 @@ function Gear.NewController(api)
         self.speed100 = 100;
         self.desiredSpeed100 = 100;
         self.lastObservedRun = nil;
+        self.frameGuardTripped = false;
+        self:ResetFrameGuardObservation();
         self:ResetMeasurement();
         return self:Emit(self:RealTime());
     end
@@ -334,6 +396,8 @@ local captions = {};
 local noticeKey = "hint";
 local lastLocaleSecond = nil;
 local lastLauncherText = nil;
+local lastFrameGuardNotice = false;
+local lastNoticeText = nil;
 
 local function bindText(widget, key)
     table.insert(captions, { widget = widget, key = key });
@@ -422,9 +486,16 @@ end
 
 local function render()
     updateLauncher();
+    local guardNotice = controller.frameGuardTripped and controller.bridgeReady;
+    if (guardNotice and controller.active and not lastFrameGuardNotice) then chat(tr("frame_guard")); end
+    lastFrameGuardNotice = controller.frameGuardTripped and true or false;
     if (measurementMatchesTarget() and (noticeKey == "switching" or noticeKey == "stop_sent")) then
         noticeKey = "hint";
-        if (noticeLabel) then noticeLabel:SetText(tr(noticeKey)); end
+    end
+    local notice = tr(guardNotice and "frame_guard" or noticeKey);
+    if (noticeLabel and notice ~= lastNoticeText) then
+        noticeLabel:SetText(notice);
+        lastNoticeText = notice;
     end
     if (not statusLabel) then return; end
     local status = "";
@@ -442,6 +513,8 @@ local function render()
         if (controller.desiredSpeed100 ~= 100) then
             status = string.format(tr("suspended"), speedText(controller.desiredSpeed100));
         else status = tr("inactive"); end
+    elseif (controller.frameGuardTripped) then
+        status = tr("frame_guard");
     else
         status = string.format(tr("target_wait"), speedText(controller.speed100));
         if (controller.measured) then
@@ -467,21 +540,16 @@ end
 local function requestSpeed(value)
     if (controller:RequestSpeed(value)) then
         noticeKey = "switching";
-        if (noticeLabel) then noticeLabel:SetText(tr(noticeKey)); end
     else
         noticeKey = "invalid_speed";
-        if (noticeLabel) then noticeLabel:SetText(tr(noticeKey)); end
     end
     render();
 end
 
 local function emergencyStop()
     local sent = controller:EmergencyStop();
-    if (noticeLabel) then
-        if (sent) then noticeKey = "stop_sent";
-        else noticeKey = "stop_failed"; end
-        noticeLabel:SetText(tr(noticeKey));
-    end
+    if (sent) then noticeKey = "stop_sent";
+    else noticeKey = "stop_failed"; end
     render();
 end
 
@@ -618,7 +686,7 @@ local function buildPanel()
     local function submitCustom()
         local number = tonumber(customBox:GetText());
         if (finiteNumber(number)) then requestSpeed(number * 100);
-        else noticeKey = "invalid_speed"; noticeLabel:SetText(tr(noticeKey)); end
+        else noticeKey = "invalid_speed"; render(); end
         customBox:ClearFocus();
     end
     customBox:SetScript("OnEnterPressed", submitCustom);
@@ -672,7 +740,7 @@ I18n.Listen(function()
         index = index + 1;
     end
     updateLauncher();
-    if (noticeLabel) then noticeLabel:SetText(tr(noticeKey)); end
+    lastNoticeText = nil;
     lastRendered = nil;
     render();
 end);

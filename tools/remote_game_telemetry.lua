@@ -6,6 +6,7 @@ local sequence, runPackets, spellPackets, stops, hits, resets = 0, 0, 0, 0, 0, 0
 local firstPlaying, previousCd, previousSpell, previousStamp, lastTarget;
 local pulse = 0;
 local updates = 0;
+local accelerationGuardLatched = false;
 local initialized = false;
 local function number(value)
     if (type(value) ~= "number" or value ~= value or value < -1e10 or value > 1e10) then return -1; end
@@ -68,11 +69,20 @@ frame:SetScript("OnUpdate", function()
     local mode = AZSGAcceptanceMode == "hooked" and 1 or 0;
     local target = mode == 1 and (stage == 3 or stage == 4) and 200 or 100;
     local accepted = 0;
+    local guardTripped, effectiveSpeed100 = 0, 100;
     if (mode == 1 and AZSSpeedGear and AZSSpeedGear.controller) then
         local controller = AZSSpeedGear.controller;
-        if (target ~= lastTarget) then
+        if (controller.frameGuardTripped == true) then accelerationGuardLatched = true; end
+        -- Preserve the accelerated target as evidence, while never retrying an
+        -- acceleration request after the production controller trips its guard.
+        if (target ~= lastTarget and not (accelerationGuardLatched and target > 100)) then
             if (controller:RequestSpeed(target)) then lastTarget = target; end
         end
+        if (controller.frameGuardTripped == true) then
+            accelerationGuardLatched = true;
+            guardTripped = 1;
+        end
+        effectiveSpeed100 = number(controller.speed100);
         if (lastTarget == target) then accepted = 1; end
     end
     local x, y = -1, -1;
@@ -104,7 +114,8 @@ frame:SetScript("OnUpdate", function()
         .. "|" .. resets .. "|" .. stops .. "|" .. hits .. "|" .. fmt(run.hp)
         .. "|" .. runPackets .. "|" .. spellPackets .. "|" .. accepted
         .. "|" .. shown(ChatFrameEditBox) .. "|" .. shown(GameMenuFrame)
-        .. "|" .. string.format("%.0f", instance) .. "|" .. string.format("%.0f", updates);
+        .. "|" .. string.format("%.0f", instance) .. "|" .. string.format("%.0f", updates)
+        .. "|" .. guardTripped .. "|" .. string.format("%.0f", effectiveSpeed100);
     SetCVar(cvar, payload);
     ConsoleExec(cvar);
 end);

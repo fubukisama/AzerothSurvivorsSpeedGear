@@ -27,6 +27,7 @@ $report = [ordered]@{ schema = 1; product = 'AzerothSurvivorsSpeedGear'; status 
     machine = [ordered]@{ logicalProcessors = $null; totalPhysicalMemoryBytes = $null }
     startupSeconds = 90
     viewport = '640x480'
+    acceptanceMode = 'normal_2x'
     renderingRequested = 'DX12 software fallback / Microsoft Basic Render Driver'; runs = @(); criteria = @(); metrics = $null; missingEvidence = @()
     scope = 'One official Windows build on a disposable software-rendered runner. No general gameplay or future-version certification.'
     clock = 'GetSystemTimePreciseAsFileTime in the unhooked parent process'
@@ -576,14 +577,16 @@ public sealed class AZSGRemoteGame : IDisposable {
 '@
 
 function Read-Telemetry($Row) {
-    $match = [regex]::Match($Row.Payload, '^(?<protocol>AZSGT1\|[0-9]+\|[01]\|(?:100|200)\|[0-5]\|(?:unknown|ready|playing|choosing|paused|dead|victory)\|(?:-?[0-9]+(?:\.[0-9]+)?\|){16}[01]\|(?:-1|[01])\|(?:-1|[01])\|[0-9]{1,16}\|[0-9]{1,16})(?:[^0-9.|]|$)')
+    $match = [regex]::Match($Row.Payload, '^(?<protocol>AZSGT1\|[0-9]+\|[01]\|(?:100|200)\|[0-5]\|(?:unknown|ready|playing|choosing|paused|dead|victory)\|(?:-?[0-9]+(?:\.[0-9]+)?\|){16}[01]\|(?:-1|[01])\|(?:-1|[01])\|[0-9]{1,16}\|[0-9]{1,16}\|[01]\|(?:-1|[0-9]{2,4}))(?:[^0-9.|]|$)')
     if (-not $match.Success) { return $null }
     $parts = $match.Groups['protocol'].Value.Split('|')
-    if ($parts.Count -ne 27) { return $null }
+    if ($parts.Count -ne 29) { return $null }
     [long]$instance = 0
     if (-not [long]::TryParse($parts[25], [ref]$instance) -or $instance -lt 1 -or $instance -gt 9007199254740991L) { return $null }
     [long]$frames = 0
     if (-not [long]::TryParse($parts[26], [ref]$frames) -or $frames -lt 1 -or $frames -gt 9007199254740991L) { return $null }
+    $effectiveSpeed100 = [int]$parts[28]
+    if ($effectiveSpeed100 -ne -1 -and ($effectiveSpeed100 -lt 25 -or $effectiveSpeed100 -gt 1000)) { return $null }
     $numeric = @()
     for ($index = 6; $index -le 21; $index++) {
         [double]$value = 0
@@ -597,7 +600,8 @@ function Read-Telemetry($Row) {
         spellId = $numeric[7]; cd = $numeric[8]; cdmax = $numeric[9]; cooldownResets = $numeric[10]
         spellcastStopEvents = $numeric[11]; selfDamageEvents = $numeric[12]; hp = $numeric[13]
         runPackets = $numeric[14]; spellPackets = $numeric[15]; requestAccepted = [int]$parts[22]
-        chatOpen = [int]$parts[23]; gameMenuShown = [int]$parts[24]; instance = $instance; frames = $frames }
+        chatOpen = [int]$parts[23]; gameMenuShown = [int]$parts[24]; instance = $instance; frames = $frames
+        guardTripped = ($parts[27] -ceq '1'); effectiveSpeed100 = $effectiveSpeed100 }
 }
 
 function Read-NativeBackendEvidence([string]$GameRoot) {
@@ -749,6 +753,7 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
     $movementKey = 0; $moveStage = -1; $moveStart = 0L; $inputOkay = $true; $reason = 'blocked_no_playing'
     $startupHeld = $false; $startupHoldUntil = 0L; $lastEscapeSeq = -1L; $startupEnterAttempts = 0
     $frameAttempted = $false; $earlyCapture = $null
+    $firstGuardRow = $null; $postGuardNative = $null
     $telemetryInstance = 0L; $instanceSequences = @{}; $telemetryReloaded = $false; $playingInstance = 0L
     try {
         $session.Start($info)
@@ -777,12 +782,18 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
                     if (-not $instanceSequences.ContainsKey($instanceKey) -or $sample.seq -gt $instanceSequences[$instanceKey]) {
                         $instanceSequences[$instanceKey] = $sample.seq; $samples.Add($sample)
                         if ($sample.phase -ceq 'playing') { $playingInstance = $sample.instance }
+                        if ($Mode -ceq 'hooked' -and $null -eq $firstGuardRow -and $sample.phase -ceq 'playing' -and
+                            $sample.target -eq 200 -and $sample.guardTripped -and $sample.effectiveSpeed100 -eq 100) { $firstGuardRow = $sample }
                     }
                 }
                 $row = $null
             }
             if ($telemetryReloaded) { break }
             $now = [AZSGRemoteGame]::Wall()
+            if ($null -ne $firstGuardRow -and $null -eq $postGuardNative -and ($now - $firstGuardRow.fileTime) / 1e7 -ge 1.5) {
+                $postGuardNative = [pscustomobject]@{ fileTime = $now; secondsAfterGuard = ($now-$firstGuardRow.fileTime)/1e7
+                    nativeBackend = Read-NativeBackendEvidence $GameRoot }
+            }
             if ($samples.Count -gt 0) {
                 $latest = $samples[$samples.Count - 1]
                 if ($latest.phase -ceq 'playing' -and $null -eq $firstPlayingAt) {
@@ -876,6 +887,7 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
             telemetryInstanceCount = $instanceSequences.Count; telemetryReloaded = $telemetryReloaded
             peakWorkingSetBytes = $peakWorkingSet; responding = $responding
             actualClientWidth = $clientWidth; actualClientHeight = $clientHeight; startupEnterAttempts = $startupEnterAttempts; nativeBackend = $nativeEvidence
+            firstGuardRow = $firstGuardRow; postGuardNative = $postGuardNative
             startupSeconds = $script:startupSeconds; loadingCoverObserved = $session.LoadingCoverObserved; loadingCoverWaiting = $session.LoadingCoverWaiting
             loadingClearObserved = $session.LoadingClearObserved; loadingSnapshots = @($session.LoadingSnapshots)
             pipelineWarmTimedOut = $session.PipelineWarmTimedOut; pipelineWarmPending = $session.PipelineWarmPending
@@ -898,16 +910,17 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
     }
 }
 
-function Get-StageMetrics($Run, [int]$Stage) {
+function Get-StageMetrics($Run, [int]$Stage, [long]$NotBeforeFileTime = 0, [switch]$PermitGuardFallback) {
     $all = @($Run.samples | Where-Object { $_.stage -eq $Stage })
     if ($all.Count -eq 0) { return $null }
     # Give command delivery and transition effects two external, unhooked
     # seconds to settle before any measured window begins.
     $cutoff = $all[0].fileTime + 20000000L
+    if ($NotBeforeFileTime -gt $cutoff) { $cutoff = $NotBeforeFileTime }
     $all = @($all | Where-Object { $_.fileTime -ge $cutoff })
     $rows = @($all | Where-Object { $_.phase -ceq 'playing' -and $_.rawT -ge 0 })
     if ($rows.Count -lt 8 -or $rows.Count -ne $all.Count) { return $null }
-    if ($Run.mode -ceq 'hooked' -and @($rows | Where-Object { $_.requestAccepted -ne 1 }).Count -gt 0) { return $null }
+    if ($Run.mode -ceq 'hooked' -and -not $PermitGuardFallback -and @($rows | Where-Object { $_.requestAccepted -ne 1 }).Count -gt 0) { return $null }
     $span = ($rows[-1].fileTime - $rows[0].fileTime) / 1e7
     if ($span -lt 3) { return $null }
     [double]$distance = 0; [double]$decay = 0; [double]$decaySpan = 0; [double]$maxGap = 0
@@ -944,6 +957,9 @@ function Get-StageMetrics($Run, [int]$Stage) {
 
 try {
     New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($env:AZSG_EXPECT_FRAME_GUARD) -and $env:AZSG_EXPECT_FRAME_GUARD -cnotin @('0', '1')) { throw 'blocked_frame_guard_mode' }
+    $script:expectFrameGuard = $env:AZSG_EXPECT_FRAME_GUARD -ceq '1'
+    if ($script:expectFrameGuard) { $report.acceptanceMode = 'frame_guard_fallback' }
     $script:startupSeconds = 90
     if (-not [string]::IsNullOrWhiteSpace($env:AZSG_STARTUP_SECONDS)) {
         [int]$requestedStartup = 0
@@ -1022,6 +1038,57 @@ try {
     $moveOne = Get-StageMetrics $report.runs[1] 2
     $moveTwo = Get-StageMetrics $report.runs[1] 4
     $report.metrics = [ordered]@{ unhooked = $base; hooked1x = $one; hooked2x = $two; movement1x = $moveOne; movement2x = $moveTwo }
+    if ($script:expectFrameGuard) {
+        $hooked = $report.runs[1]
+        $guardObserved = $null -ne $hooked.firstGuardRow
+        $postGuard = $null; $laterTargets = @(); $laterStageFour = @(); $latchFailures = @()
+        if ($guardObserved) {
+            # Measure only after the actual guard observation and delivery
+            # settling time; never average the earlier acceleration into 1x.
+            $postGuard = Get-StageMetrics $hooked 3 -NotBeforeFileTime ($hooked.firstGuardRow.fileTime + 15000000L) -PermitGuardFallback
+            $laterTargets = @($hooked.samples | Where-Object { $_.fileTime -ge $hooked.firstGuardRow.fileTime -and $_.target -eq 200 -and $_.stage -in @(3,4) })
+            $laterStageFour = @($laterTargets | Where-Object { $_.stage -eq 4 })
+            $latchFailures = @($laterTargets | Where-Object { -not $_.guardTripped -or $_.effectiveSpeed100 -ne 100 })
+        }
+        $report.metrics.postGuardStage3 = $postGuard
+        $originalTimerRatio = if ($null -ne $one -and $one.rawRunRate -gt 0 -and $null -ne $two) { $two.rawRunRate/$one.rawRunRate } else { $null }
+        $originalMovementRatio = if ($null -ne $moveOne -and $null -ne $moveOne.mapUvRate -and $moveOne.mapUvRate -gt 0 -and $null -ne $moveTwo -and $null -ne $moveTwo.mapUvRate) { $moveTwo.mapUvRate/$moveOne.mapUvRate } else { $null }
+        $originalCooldownRatio = if ($null -ne $one -and $null -ne $one.cooldownDecayRate -and $one.cooldownDecayRate -gt 0 -and $null -ne $two -and $null -ne $two.cooldownDecayRate) { $two.cooldownDecayRate/$one.cooldownDecayRate } else { $null }
+        $postGuardTimerRatio = if ($null -ne $one -and $one.rawRunRate -gt 0 -and $null -ne $postGuard) { $postGuard.rawRunRate/$one.rawRunRate } else { $null }
+        $postGuardCooldownRatio = if ($null -ne $one -and $null -ne $one.cooldownDecayRate -and $one.cooldownDecayRate -gt 0 -and $null -ne $postGuard -and $null -ne $postGuard.cooldownDecayRate) { $postGuard.cooldownDecayRate/$one.cooldownDecayRate } else { $null }
+        $report.metrics.originalTarget2xRatios = [ordered]@{ serverClock = $originalTimerRatio; mapUvMovement = $originalMovementRatio; rawCooldownDecay = $originalCooldownRatio }
+        $report.metrics.postGuardRatios = [ordered]@{ serverClock = $postGuardTimerRatio; rawCooldownDecay = $postGuardCooldownRatio }
+        $nativeSpeed = $null; $nativeRestored = $false
+        if ($null -ne $hooked.postGuardNative) {
+            $snapshot = $hooked.postGuardNative.nativeBackend
+            $nativeSpeed = $snapshot.speed100
+            $nativeRestored = $snapshot.statusAvailable -and $snapshot.backend -ceq 'ready' -and $nativeSpeed -eq 100 -and $hooked.postGuardNative.secondsAfterGuard -ge 1.5
+        }
+        $latched = $guardObserved -and $laterTargets.Count -gt 1 -and $laterStageFour.Count -gt 0 -and $latchFailures.Count -eq 0
+        $report.metrics.frameGuard = [ordered]@{ firstRow = $hooked.firstGuardRow; postGuardNative = $hooked.postGuardNative
+            laterAcceleratedTargetSamples = $laterTargets.Count; laterStageFourSamples = $laterStageFour.Count; latchFailures = $latchFailures.Count }
+        $report.criteria = @(
+            [pscustomobject]@{ name='unhooked_server_clock'; observed=$(if ($null -ne $base) { $base.rawRunRate } else { $null }); minimum=0.75; maximum=1.25; passed=($null -ne $base -and $base.rawRunRate -ge 0.75 -and $base.rawRunRate -le 1.25) },
+            [pscustomobject]@{ name='hooked_1x_server_clock'; observed=$(if ($null -ne $one) { $one.rawRunRate } else { $null }); minimum=0.75; maximum=1.25; passed=($null -ne $one -and $one.rawRunRate -ge 0.75 -and $one.rawRunRate -le 1.25) },
+            [pscustomobject]@{ name='frame_guard_observed'; observed=$guardObserved; expected=$true; passed=$guardObserved },
+            [pscustomobject]@{ name='frame_guard_native_restored_1x'; observed=$nativeSpeed; minimum=100; maximum=100; passed=$nativeRestored },
+            [pscustomobject]@{ name='post_guard_server_clock_ratio'; observed=$postGuardTimerRatio; minimum=0.75; maximum=1.25; passed=($null -ne $postGuardTimerRatio -and $postGuardTimerRatio -ge 0.75 -and $postGuardTimerRatio -le 1.25) },
+            [pscustomobject]@{ name='post_guard_raw_cooldown_decay_ratio'; observed=$postGuardCooldownRatio; minimum=0.7; maximum=1.3; passed=($null -ne $postGuardCooldownRatio -and $postGuardCooldownRatio -ge 0.7 -and $postGuardCooldownRatio -le 1.3) },
+            [pscustomobject]@{ name='frame_guard_remains_latched'; observed=$latchFailures.Count; minimum=0; maximum=0; passed=$latched }
+        )
+        foreach ($name in @('unhooked', 'hooked1x', 'postGuardStage3')) {
+            $metric = $report.metrics[$name]
+            if ($null -eq $metric) { $report.missingEvidence += $name }
+            elseif ($metric.maxSampleGapSeconds -gt 1) { $report.missingEvidence += ($name + '.continuousSamples') }
+        }
+        if ($null -ne $one -and ($null -eq $one.cooldownDecayRate -or $one.cooldownDecayRate -le 0)) { $report.missingEvidence += 'hooked1x.cooldownDecayRate' }
+        if ($null -ne $postGuard -and ($null -eq $postGuard.cooldownDecayRate -or $postGuard.cooldownDecayRate -le 0)) { $report.missingEvidence += 'postGuardStage3.cooldownDecayRate' }
+        if ($report.missingEvidence.Count -gt 0) { throw 'blocked_incomplete_frame_guard_evidence' }
+        $failed = @($report.criteria | Where-Object { -not $_.passed })
+        $report.status = if ($failed.Count) { 'failed' } else { 'passed' }
+        $report.reason = if ($failed.Count) { 'observed_frame_guard_metrics_outside_declared_bounds' } else { 'frame_guard_restored_normal_speed_and_remained_latched_on_this_runner' }
+        $exitCode = if ($failed.Count) { 1 } else { 0 }
+    } else {
     foreach ($name in $report.metrics.Keys) { if ($null -eq $report.metrics[$name]) { $report.missingEvidence += $name } }
     if ($report.missingEvidence.Count -gt 0) { throw 'blocked_incomplete_playing_windows' }
     if (@($base,$one,$two,$moveOne,$moveTwo | Where-Object { $_.maxSampleGapSeconds -gt 1 }).Count -gt 0) { throw 'blocked_software_rendering_cadence' }
@@ -1046,6 +1113,7 @@ try {
     $report.status = if ($failed.Count) { 'failed' } else { 'passed' }
     $report.reason = if ($failed.Count) { 'observed_metrics_outside_declared_bounds' } else { 'declared_timer_movement_and_cooldown_metrics_observed_on_this_runner' }
     $exitCode = if ($failed.Count) { 1 } else { 0 }
+    }
 } catch {
     # Never copy exception text or the game log: either may contain asset data
     # or private paths. Publish only fixed diagnostic categories.

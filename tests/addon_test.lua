@@ -730,4 +730,70 @@ check(table.getn(statusMessages) == 2 and string.find(statusMessages[1], AZSSpee
 check(table.getn(writes) == beforeStatusWrites and AZSSpeedGear.controller.speed100 == beforeStatusSpeed,
     "status inspection does not emit speed requests or alter the selected speed");
 
+-- Exercise the production driver, CVar adapter and hidden-panel rendering with
+-- independent physical, client and server clocks. The requested speed never
+-- supplies an observation rate: this backend oracle explicitly advances x2.
+AZSSpeedGearNativeLocale = "zh";
+gamePhase = "playing";
+AZS_PARTY = {};
+fire("PLAYER_LEAVING_WORLD");
+fire("PLAYER_ENTERING_WORLD");
+SlashCmdList.AZSSPEEDGEAR("hide");
+SlashCmdList.AZSSPEEDGEAR("2");
+advanceUI(4, 2);
+local guardLauncherCaption = AZSSpeedGearI18n.Text("launcher");
+check(AZSSpeedGear.launcher.text == guardLauncherCaption .. " ×2" and not AZSSpeedGear.panel.shown,
+    "frame-guard UI scenario starts with a genuinely confirmed x2 and hidden panel");
+local guardMessages = {};
+DEFAULT_CHAT_FRAME = { AddMessage = function(self, text) table.insert(guardMessages, text); end };
+local guardWrites = table.getn(writes);
+local guardPhysical = wall + 0.125;
+local slowFrame = 1;
+while (slowFrame <= 3) do
+    -- Five physical callbacks per second, actual client/server clocks at x2:
+    -- each callback spans 0.4 virtual seconds, beyond the 0.25 movement cap.
+    guardPhysical = guardPhysical + 0.2;
+    wall = math.floor(guardPhysical);
+    uiClientClock = uiClientClock + 0.4;
+    runClock = runClock + 0.4;
+    AZS_RUN.t = runClock;
+    AZS_RUN_UPDATED = uiClientClock;
+    driver.scripts.OnUpdate();
+    if (slowFrame < 3) then
+        check(AZSSpeedGear.controller.speed100 == 200 and table.getn(guardMessages) == 0,
+            "one or two slow UI frames do not stop or warn " .. slowFrame);
+    end
+    slowFrame = slowFrame + 1;
+end
+check(AZSSpeedGear.controller.speed100 == 100 and AZSSpeedGear.controller.desiredSpeed100 == 100
+    and table.getn(writes) == guardWrites + 1 and string.find(writes[table.getn(writes)], "|100|1$") ~= nil,
+    "third slow production frame immediately requests active x1 through the real CVar adapter");
+check(AZSSpeedGear.controller.confirmedSpeed100 == nil and AZSSpeedGear.launcher.text == guardLauncherCaption .. " …",
+    "automatic restore immediately removes the old confirmed x2 without claiming unmeasured x1");
+check(hasPanelText(AZSSpeedGearI18n.Text("frame_guard")) and not AZSSpeedGear.panel.shown,
+    "hidden panel retains the localized reason for automatic restore");
+check(table.getn(guardMessages) == 1
+    and string.find(guardMessages[1], AZSSpeedGearI18n.Text("frame_guard"), 1, true) ~= nil,
+    "automatic restore gives exactly one localized chat notice while the panel is hidden");
+advanceUI(8, 1);
+check(AZSSpeedGear.controller.speed100 == 100 and AZSSpeedGear.controller.desiredSpeed100 == 100
+    and AZSSpeedGear.launcher.text == guardLauncherCaption .. " ×1" and table.getn(guardMessages) == 1,
+    "stable frames confirm x1 without reaccelerating or repeating the guard notice");
+local guardWriteIndex = guardWrites + 1;
+while (guardWriteIndex <= table.getn(writes)) do
+    check(string.find(writes[guardWriteIndex], "|100|1$") ~= nil,
+        "every post-guard production request retains active x1 " .. guardWriteIndex);
+    guardWriteIndex = guardWriteIndex + 1;
+end
+SlashCmdList.AZSSPEEDGEAR("show");
+check(AZSSpeedGear.panel.shown and hasPanelText(AZSSpeedGearI18n.Text("frame_guard"))
+    and table.getn(guardMessages) == 1, "opening the panel exposes the retained guard reason without another chat notice");
+AZSSpeedGearNativeLocale = "ja";
+advanceUI(1, 1);
+check(AZSSpeedGearI18n.code == "ja" and hasPanelText(AZSSpeedGearI18n.catalogs.ja.frame_guard)
+    and AZSSpeedGear.launcher.text == AZSSpeedGearI18n.catalogs.ja.launcher .. " ×1",
+    "language refresh translates the retained guard reason and preserves the measured x1 caption");
+check(table.getn(guardMessages) == 1 and AZSSpeedGear.controller.speed100 == 100
+    and AZSSpeedGear.controller.desiredSpeed100 == 100, "language refresh neither repeats the warning nor restores the old target");
+
 print("AZSSpeedGear addon state and protocol: " .. checks .. " checks passed");

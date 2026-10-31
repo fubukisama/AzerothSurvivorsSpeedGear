@@ -34,6 +34,11 @@ on:
         options:
           - '640x480'
           - '320x240'
+      expect_frame_guard:
+        description: Expect automatic 1x frame protection in this dedicated acceptance run
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -154,6 +159,7 @@ jobs:
           AZSG_REMOTE_RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
           AZSG_STARTUP_SECONDS: ${{ inputs.startup_seconds }}
           AZSG_GAME_VIEWPORT: ${{ inputs.viewport }}
+          AZSG_EXPECT_FRAME_GUARD: ${{ inputs.expect_frame_guard && '1' || '0' }}
           WGPU_DX12_COMPILER: ${{ inputs.runtime_profile == 'updated_warp' && 'dxc' || '' }}
         run: ./tools/remote_game_acceptance.ps1 -PackagePath $env:AZSG_ACCEPTANCE_PACKAGE -OutputPath acceptance/report.json
       - name: Retain only our bounded numerical report

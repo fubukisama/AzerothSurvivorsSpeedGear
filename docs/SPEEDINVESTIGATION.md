@@ -1,5 +1,39 @@
 # Speed investigation — 2026-10-31
 
+## Real game 0.131.0 and low-frame-rate protection
+
+The owner authorized a private transfer of the locally installed game. The bundle
+contained only the official EXE (SHA-256
+`5dd6819d836748ccf809ab76fe6509c9ee793e087939b5d036c430d835a14e63`),
+eleven MPQs and a file manifest. No saves or personal settings were transferred.
+The remote baseline initially lost its software graphics device; a verified
+DXC/WARP profile fixed startup. Waiting for the native loading-cover clear signal
+then enabled actual combat, rather than mistaking server `ready` for a loaded
+client.
+
+In [run 41173937030](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41173937030),
+the real unhooked game clock ran at 0.998x. With the plugin set to 1x it ran at
+1.007x; a 2x request produced 2.013x game time and 2.092x raw cooldown decay.
+Movement relative to the 1x window was only 0.931x. The actual client measured
+320x240 and updated only about 2.7–3.3 times per real second. Thus this run did
+not pass the movement criterion; the timer and cooldown results do not certify
+uniform 2x gameplay.
+
+The base client advances movement through Bevy's virtual time, whose default
+maximum frame delta is 250ms. UI/GetTime retains the uncapped frame step. The
+observed per-update displacement plateau matches this mechanism: at very low
+update rates, accelerating the clocks can make simulation and cooldowns outrun
+frame-driven movement. This is strong evidence for a low-frame-rate limit, not
+proof of the cause of a particular player's desktop symptoms.
+
+Version 0.6.3 detects three consecutive client-clock gaps over 250ms while an
+accelerated solo request is active. It sends a fresh 1x request, clears the
+retained acceleration and reports the reason. Recovery never automatically
+re-enables acceleration. Localized wording describes a request, not a native
+receipt. The engine's physics clamp remains intact. At extremely low frame rates
+even the original unmodified 1x game can be limited; returning to 1x prevents
+additional acceleration from worsening that disparity.
+
 ## Reproduced display defect
 
 The remote [pre-fix regression](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41096103400)
