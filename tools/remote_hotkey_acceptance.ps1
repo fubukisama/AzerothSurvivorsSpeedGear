@@ -68,12 +68,19 @@ public static class AZSGHotkeyMouse {
         $script:hk.input.Add([pscustomobject]@{fileTime=[AZSGRemoteGame]::Wall(); kind='keyboard'; vk=$Key; down=$Down; sent=$okay})
         if (-not $okay) { throw 'blocked_input_or_foreground' }
     }
+    function Pause-Hotkey([int]$Milliseconds) {
+        # Keep the unhooked native observer running while physical keys/buttons
+        # are held. A legitimate low-frame-rate reset may make 2x short-lived.
+        $until=[AZSGRemoteGame]::Wall()+$Milliseconds*10000L
+        do { Drain-Hotkey; Start-Sleep -Milliseconds 50 } while ([AZSGRemoteGame]::Wall() -lt $until)
+        Drain-Hotkey
+    }
     function Tap-Hotkey([uint16]$Key,[uint16]$Modifier=0) {
-        if ($Modifier -ne 0) { Key-Hotkey $Modifier $true; Start-Sleep -Milliseconds 650 }
+        if ($Modifier -ne 0) { Key-Hotkey $Modifier $true; Pause-Hotkey 650 }
         Key-Hotkey $Key $true
-        Start-Sleep -Milliseconds 450
+        Pause-Hotkey 450
         Key-Hotkey $Key $false
-        if ($Modifier -ne 0) { Start-Sleep -Milliseconds 450; Key-Hotkey $Modifier $false }
+        if ($Modifier -ne 0) { Pause-Hotkey 450; Key-Hotkey $Modifier $false }
     }
     function Click-Hotkey([string]$Name) {
         Drain-Hotkey
@@ -82,7 +89,7 @@ public static class AZSGHotkeyMouse {
         $x=[int][Math]::Round($point[0]*$size[0]); $y=[int][Math]::Round($point[1]*$size[1])
         $window=$script:hk.session.Child.MainWindowHandle
         $okay=[AZSGHotkeyMouse]::Click($window,$x,$y,$true)
-        Start-Sleep -Milliseconds 450
+        Pause-Hotkey 450
         $okay=[AZSGHotkeyMouse]::Click($window,$x,$y,$false) -and $okay
         $script:hk.input.Add([pscustomobject]@{fileTime=[AZSGRemoteGame]::Wall(); kind='mouse'; button=$Name; x=$x; y=$y; sent=$okay})
         if (-not $okay) { throw 'blocked_input_or_foreground' }
@@ -176,7 +183,9 @@ public static class AZSGHotkeyMouse {
         Unused-Hotkey 'old_q_released' 0x51; Unused-Hotkey 'old_e_released' 0x45
         Step-Hotkey 'r_slower' 0x52 50 -1; Step-Hotkey 'ctrl_t_faster' 0x54 100 1 0x11
         $script:hk.phase='persist_restart'; Save-HotkeySession 1 $true
-        $savedPath=Join-Path $state 'saved-variables.lua'
+        # Declared AddOn SavedVariables use the per-addon account file. The
+        # separate flat saved-variables.lua belongs to FrameXML state.
+        $savedPath=Join-Path $state 'saved\AZSSpeedGear.lua'
         $saved=if (Test-Path -LiteralPath $savedPath -PathType Leaf) { [IO.File]::ReadAllText($savedPath) } else { '' }
         Assert-Hotkey 'saved_custom_keys' ($saved -match 'hotkeyDown[^\r\n]{0,30}"R"' -and $saved -match 'hotkeyUp[^\r\n]{0,30}"CTRL-T"') $true
         $script:hk.phase='restart_custom_keys'; Start-HotkeySession 2
