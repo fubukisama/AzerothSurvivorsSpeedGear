@@ -461,7 +461,7 @@ public sealed class AZSGRemoteGame : IDisposable {
     if(!capturePanic) return;
     lock(panicLock) {
       if(panic && !panicStarted) { panicStarted=true; panicRemaining=4; }
-      if(panicRemaining>0) { panicExcerpt.Add(RedactedLine(text)); --panicRemaining; }
+      if(panicRemaining>0) { var line=RedactedLine(text); if(line.Length>0) { panicExcerpt.Add(line); --panicRemaining; } }
     }
   }
   void Line(object sender,DataReceivedEventArgs e) {
