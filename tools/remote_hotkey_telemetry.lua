@@ -7,6 +7,7 @@ local seq, frames, actions = 0, 0, 0;
 local direction, before, after, accepted = 0, 100, 100, 0;
 local instance = math.floor(time() * 1000 + math.random(1, 999));
 local initialized, wrapped = false, false;
+local playingOptionAttempts = 0;
 local captureWrapper;
 local captureEvents = 0;
 local captureKey, captureCtrl, captureShift, captureAlt = "none", "none", "none", "none";
@@ -47,6 +48,12 @@ local function install()
     if (not initialized and type(RegisterCVar) == "function") then
         RegisterCVar(cvar, ""); initialized = true;
         if (type(AZS_SetStoringLevels) == "function") then pcall(AZS_SetStoringLevels, true); end
+    end
+    -- The character/server may not exist when the observer first loads. Retry
+    -- this ordinary disposable game option only on the first playing frames.
+    if (playingOptionAttempts < 3 and safe(AZS_GetPhase) == "playing" and type(AZS_SetStoringLevels) == "function") then
+        playingOptionAttempts = playingOptionAttempts + 1;
+        pcall(AZS_SetStoringLevels, true);
     end
     if (not wrapped and AZSSpeedGear and type(AZSSpeedGear.StepHotkey) == "function") then
         local original = AZSSpeedGear.StepHotkey;

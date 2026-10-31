@@ -4,6 +4,7 @@ function Invoke-HotkeyAcceptance([string]$GameRoot, [string]$Assets, [string]$Of
     if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows') { throw 'blocked_remote_only' }
     $script:hk = [ordered]@{ schema=1; status='blocked'; reason='not_started'; phase='provision'; criteria=@(); sessions=@();
         current=$null; session=$null; rows=$null; native=$null; input=$null; exceptionType=$null; errorLine=$null;
+        choiceHeld=$false; choiceStart=0L; choiceFrame=0; choiceLast=0L; choiceAttempts=0;
         scope='Physical SendInput into one official game build. Native acknowledgements prove delivery, not uniform movement or skill timing.' }
     $mouseSource = @'
 using System;
@@ -53,6 +54,26 @@ public static class AZSGHotkeyMouse {
             $script:hk.native.Add([pscustomobject]@{fileTime=[AZSGRemoteGame]::Wall(); speed100=$snapshot.speed100; backend=$snapshot.backend; transport=$snapshot.transport})
         }
         if ($script:hk.session.Child.HasExited) { throw 'blocked_game_exited' }
+        # Resolve the game's own level-choice modal with real number-key input.
+        # Never send a choice key while the plugin is recording a binding. Keep
+        # the state machine here nonrecursive: no Tap/Pause/Drain helper calls.
+        $now=[AZSGRemoteGame]::Wall(); $latest=$script:hk.current
+        if ($null -ne $latest) {
+            if ($script:hk.choiceHeld) {
+                $timedOut=($now-$script:hk.choiceStart)/1e7 -ge 6
+                if ($latest.phase -cne 'choosing' -or $latest.capture -ne 0 -or $latest.frames -ge $script:hk.choiceFrame+2 -or $timedOut) {
+                    Key-Hotkey 0x31 $false
+                    $script:hk.choiceHeld=$false; $script:hk.choiceLast=$now
+                    if ($latest.phase -ceq 'choosing' -and $script:hk.choiceAttempts -ge 3) { throw 'blocked_level_choice_input' }
+                }
+            } elseif ($latest.phase -ceq 'choosing' -and $latest.capture -eq 0 -and ($now-$script:hk.choiceLast)/1e7 -ge 1) {
+                $script:hk.choiceAttempts++; $script:hk.choiceStart=$now; $script:hk.choiceFrame=$latest.frames
+                Key-Hotkey 0x31 $true
+                $script:hk.choiceHeld=$true
+            } elseif ($latest.phase -cne 'choosing') {
+                $script:hk.choiceAttempts=0
+            }
+        }
     }
     function Assert-Hotkey([string]$Name,[bool]$Okay,$Observed) {
         $script:hk.criteria += [pscustomobject]@{name=$Name; passed=$Okay; observed=$Observed}
@@ -65,6 +86,7 @@ public static class AZSGHotkeyMouse {
             if ($null -ne $script:hk.current -and (& $Condition)) { Assert-Hotkey $Name $true $script:hk.current; return }
             Start-Sleep -Milliseconds 50
         } while ([AZSGRemoteGame]::Wall() -lt $until)
+        if ($null -ne $script:hk.current -and $script:hk.current.phase -ceq 'choosing') { throw 'blocked_level_choice_modal' }
         Assert-Hotkey $Name $false $script:hk.current
     }
     function Key-Hotkey([uint16]$Key,[bool]$Down) {
@@ -87,7 +109,7 @@ public static class AZSGHotkeyMouse {
         if ($Modifier -ne 0) { Pause-Hotkey 450; Key-Hotkey $Modifier $false }
     }
     function Click-Hotkey([string]$Name) {
-        Drain-Hotkey
+        Wait-Hotkey ('ui_'+$Name+'_playing') { $script:hk.current.phase -ceq 'playing' -and $script:hk.current.active -eq 1 -and -not $script:hk.choiceHeld }
         $point=$script:hk.current.$Name; $size=$script:hk.session.ClientSize()
         if ($null -eq $size -or $null -eq $point -or $point.Count -ne 2 -or $point[0] -le 0 -or $point[0] -ge 1 -or $point[1] -le 0 -or $point[1] -ge 1 -or -not $script:hk.session.Focus()) { throw 'blocked_button_coordinates' }
         $x=[int][Math]::Round($point[0]*$size[0]); $y=[int][Math]::Round($point[1]*$size[1])
@@ -136,7 +158,8 @@ public static class AZSGHotkeyMouse {
         Wait-Hotkey $Criterion { $script:hk.current.capture -eq 1 }
     }
     function Step-Hotkey([string]$Name,[uint16]$Key,[int]$Expected,[int]$Direction,[uint16]$Modifier=0) {
-        Drain-Hotkey; $script:hk.previousActions=$script:hk.current.actions
+        Wait-Hotkey ($Name+'_playing') { $script:hk.current.phase -ceq 'playing' -and $script:hk.current.active -eq 1 -and -not $script:hk.choiceHeld }
+        $script:hk.previousActions=$script:hk.current.actions
         $script:hk.actionStarted=[AZSGRemoteGame]::Wall()
         Tap-Hotkey $Key $Modifier
         Wait-Hotkey ($Name+'_dispatch') { $script:hk.current.actions -eq $script:hk.previousActions+1 -and $script:hk.current.direction -eq $Direction -and $script:hk.current.after -eq $Expected -and $script:hk.current.accepted -eq 1 }
@@ -150,6 +173,7 @@ public static class AZSGHotkeyMouse {
     }
     function Start-HotkeySession([int]$Number) {
         $script:hk.current=$null; $script:hk.rows=[Collections.Generic.List[object]]::new(); $script:hk.native=[Collections.Generic.List[object]]::new(); $script:hk.input=[Collections.Generic.List[object]]::new()
+        $script:hk.choiceHeld=$false; $script:hk.choiceStart=0L; $script:hk.choiceFrame=0; $script:hk.choiceLast=0L; $script:hk.choiceAttempts=0
         $info=[Diagnostics.ProcessStartInfo]::new((Join-Path $GameRoot 'AzerothSurvivors.exe'))
         $info.WorkingDirectory=$GameRoot; $info.UseShellExecute=$false; $info.CreateNoWindow=$true; $info.RedirectStandardOutput=$true; $info.RedirectStandardError=$true
         $info.StandardOutputEncoding=[Text.UTF8Encoding]::new($false); $info.StandardErrorEncoding=[Text.UTF8Encoding]::new($false)
@@ -162,7 +186,7 @@ public static class AZSGHotkeyMouse {
         $start=[AZSGRemoteGame]::Wall(); $lastInput=0L; $held=$false; $heldUntil=0L; $lastEscape=-1L
         while (([AZSGRemoteGame]::Wall()-$start)/1e7 -lt $script:startupSeconds) {
             Drain-Hotkey; $now=[AZSGRemoteGame]::Wall(); $latest=$script:hk.current
-            if ($null -ne $latest -and $latest.phase -ceq 'playing' -and $latest.active -eq 1) { if ($held) { Key-Hotkey 0x57 $false }; Assert-Hotkey ('session'+$Number+'_playing') $true $latest; return }
+            if ($null -ne $latest -and $latest.phase -ceq 'playing' -and $latest.active -eq 1 -and -not $script:hk.choiceHeld) { if ($held) { Key-Hotkey 0x57 $false }; Assert-Hotkey ('session'+$Number+'_playing') $true $latest; return }
             if ($held -and $now -ge $heldUntil) { Key-Hotkey 0x57 $false; $held=$false }
             if (($now-$lastInput)/1e7 -ge 5 -and -not $script:hk.session.LoadingCoverWaiting -and -not $held) {
                 $lastInput=$now
@@ -176,6 +200,7 @@ public static class AZSGHotkeyMouse {
     }
     function Save-HotkeySession([int]$Number,[bool]$Graceful) {
         if ($null -eq $script:hk.session) { return }
+        if ($script:hk.choiceHeld -and -not $script:hk.session.Child.HasExited) { Key-Hotkey 0x31 $false; $script:hk.choiceHeld=$false }
         $game=$script:hk.session.Child; $clean=$false
         if ($Graceful -and -not $game.HasExited) { [void]$game.CloseMainWindow(); $clean=$game.WaitForExit(30000) }
         $script:hk.sessions += [pscustomobject]@{number=$Number; gracefulExit=$clean; softwareAdapterObserved=$script:hk.session.SoftwareObserved; panicked=$script:hk.session.Panicked; gpuFailure=$script:hk.session.GpuFailure; startupCategories=@($script:hk.session.StartupCategories); droppedTelemetry=$script:hk.session.Dropped; loadingClearObserved=$script:hk.session.LoadingClearObserved; inputs=$script:hk.input.ToArray(); samples=$script:hk.rows.ToArray(); nativeTransitions=$script:hk.native.ToArray()}
@@ -214,7 +239,7 @@ public static class AZSGHotkeyMouse {
         Step-Hotkey 'e_accelerated' 0x45 200 1
         $script:hk.phase='panel_rebind'
         Click-Hotkey 'launcher'; Wait-Hotkey 'panel_opened' { $script:hk.current.panel -eq 1 }
-        Click-Hotkey 'stopButton'; Wait-Hotkey 'panel_stop' { $script:hk.current.desired -eq 100 -and $script:hk.current.speed -eq 100 }
+        Click-Hotkey 'stopButton'; Wait-Hotkey 'panel_stop' { $script:hk.current.phase -ceq 'playing' -and $script:hk.current.active -eq 1 -and $script:hk.current.desired -eq 100 -and $script:hk.current.speed -eq 100 -and $script:hk.current.guard -eq 0 }
         Open-HotkeyCapture 'downButton' 'record_down_opened'
         Tap-Hotkey 0x52; Wait-Hotkey 'record_down_r' { $script:hk.current.down -ceq 'R' -and $script:hk.current.capture -eq 0 -and $script:hk.current.r -ceq 'AZSG_SLOWER' }
         Open-HotkeyCapture 'upButton' 'record_up_opened'

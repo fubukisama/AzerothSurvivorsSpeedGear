@@ -1,5 +1,26 @@
 # Validation — updated 2026-10-31
 
+## Version 0.7.1 queued modifier capture
+
+The production-UI regression failed on the previous recorder in remote
+[run 41181296129](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41181296129):
+queued `CTRL`, then `T`, with an already-cleared native modifier query was saved
+as `T`. The revised recorder maintains capture-scoped modifier event state;
+observed releases override stale queries, and unknown state still uses the
+native query for modifiers held before recording starts. Both temporary keyboard
+handlers and their state are removed when recording ends.
+
+Remote [run 41182030824](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41182030824)
+passed all 25 CTests against source `c991ded`, including that regression, modifier
+release ordering, stale-held queries, held-before-recording fallback, and capture
+cleanup. The updater, installer and parser suites also passed.
+
+Full-game runs reuse an indexed private resource bundle while the game EXE and
+MPQ manifest remain unchanged. A plugin change or rerun does not require another
+upload from the user's machine. Each disposable runner still verifies the cached
+bundle's exact size and SHA-256 before extraction. Retain that private cache
+between tasks; only local staging copies are disposable.
+
 ## Version 0.7.0 configurable hotkeys
 
 Lua 5.0 fixtures exercise the real hotkey manager, production UI callbacks and
