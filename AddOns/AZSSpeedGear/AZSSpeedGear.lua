@@ -510,6 +510,13 @@ local hotkeyError = nil;
 local lastHotkeyText = nil;
 local customTyping = false;
 local saveBindingsWrapped = false;
+local layoutPanel = nil;
+local panelDirty = true;
+local panelWidgets = nil;
+local detailsOpen = false;
+local measureFont = nil;
+local widthCache, widthCacheCount = {}, 0;
+local lastPresetSelection = nil;
 
 local function bindText(widget, key)
     table.insert(captions, { widget = widget, key = key });
@@ -611,6 +618,8 @@ local function refreshHotkeys()
     if (signature ~= lastHotkeyText) then
         hotkeyDownButton:SetText(downText); hotkeyUpButton:SetText(upText);
         hotkeyHint:SetText(hint); lastHotkeyText = signature;
+        panelDirty = true;
+        if (layoutPanel and panelWidgets) then layoutPanel(); end
     end
 end
 
@@ -655,7 +664,10 @@ local function setShown(shown)
     local db = savedDatabase();
     db.show = shown and true or false;
     if (panel) then
-        if (db.show) then panel:Show();
+        if (db.show) then
+            panel:Show();
+            panelDirty = true;
+            if (layoutPanel) then layoutPanel(); end
         else
             customTyping = false;
             if (customBox and type(customBox.ClearFocus) == "function") then customBox:ClearFocus(); end
@@ -673,6 +685,14 @@ end
 local function render()
     updateLauncher();
     refreshHotkeys();
+    if (panelWidgets and controller.desiredSpeed100 ~= lastPresetSelection) then
+        local _, button;
+        for _, button in ipairs(panelWidgets.presets) do
+            local method = button.speedGearValue == controller.desiredSpeed100 and "LockHighlight" or "UnlockHighlight";
+            if (type(button[method]) == "function") then button[method](button); end
+        end
+        lastPresetSelection = controller.desiredSpeed100;
+    end
     local guardNotice = controller.frameGuardTripped and controller.bridgeReady;
     if (guardNotice and controller.active and not lastFrameGuardNotice) then chat(tr("frame_guard")); end
     lastFrameGuardNotice = controller.frameGuardTripped and true or false;
@@ -683,6 +703,7 @@ local function render()
     if (noticeLabel and notice ~= lastNoticeText) then
         noticeLabel:SetText(notice);
         lastNoticeText = notice;
+        panelDirty = true;
     end
     if (not statusLabel) then return; end
     local status = "";
@@ -721,7 +742,9 @@ local function render()
         measurementLabel:SetText(measurement);
         if (sendStatusLabel) then sendStatusLabel:SetText(sending); end
         lastRendered = signature;
+        panelDirty = true;
     end
+    if (panelDirty and layoutPanel) then layoutPanel(); end
 end
 
 local function requestSpeed(value)
@@ -820,18 +843,73 @@ local function emergencyStop()
     render();
 end
 
+local function textColor(widget, red, green, blue)
+    if (widget and type(widget.SetTextColor) == "function") then widget:SetTextColor(red, green, blue); end
+end
+
+local function widgetValue(widget, method)
+    if (widget and type(widget[method]) == "function") then
+        local ok, value = pcall(widget[method], widget);
+        if (ok) then return value; end
+    end
+    return nil;
+end
+
+local function setWidgetFont(widget, size)
+    local font = widget;
+    if (type(widget.GetFontString) == "function") then font = widgetValue(widget, "GetFontString") or widget; end
+    -- Preserve the native localized face instead of choosing a Latin-only font.
+    if (GameFontNormal and type(GameFontNormal.GetFont) == "function" and type(font.SetFont) == "function") then
+        local ok, face, oldSize, flags = pcall(GameFontNormal.GetFont, GameFontNormal);
+        if (ok and type(face) == "string" and face ~= "") then pcall(font.SetFont, font, face, size, flags or ""); end
+    end
+    widget.speedGearTextSize = size;
+end
+
+local function textWidth(widget)
+    local text = widgetValue(widget, "GetText") or "";
+    local size = widget.speedGearTextSize or 11;
+    local cacheKey = tostring(size) .. ":" .. text;
+    if (widthCache[cacheKey]) then return widthCache[cacheKey]; end
+    local font = widget;
+    if (type(widget.GetFontString) == "function") then font = widgetValue(widget, "GetFontString") or widget; end
+    -- Measure outside the live label's wrapping constraint. Otherwise a long
+    -- chord could shrink on every reflow as its wrapped line gets measured.
+    if (measureFont) then
+        setWidgetFont(measureFont, size);
+        measureFont:SetText(text);
+        font = measureFont;
+    end
+    if (type(font.GetStringWidth) == "function") then
+        local value = widgetValue(font, "GetStringWidth");
+        if (finiteNumber(value) and value > 0) then
+            if (widthCacheCount >= 256) then widthCache = {}; widthCacheCount = 0; end
+            widthCache[cacheKey] = value; widthCacheCount = widthCacheCount + 1;
+            return value;
+        end
+    end
+    -- Early loading and older clients may not expose font metrics yet.
+    -- Count UTF-8 glyphs, not bytes; the native metric always takes precedence.
+    local width, longest, index = 0, 0, 1;
+    while (index <= string.len(text)) do
+        local byte = string.byte(text, index);
+        if (byte == 10) then longest = math.max(longest, width); width = 0;
+        elseif (byte < 128) then width = width + size * 0.56;
+        elseif (byte >= 192) then width = width + size; end
+        index = index + 1;
+    end
+    return math.max(longest, width);
+end
+
 local function addText(parent, size, x, y, text)
     local label = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal");
-    -- Inherit the client's localized font, including Chinese glyph coverage.
-    -- Resolve a real native font path rather than hard-coding a Latin-only face.
-    if (GameFontNormal and type(GameFontNormal.GetFont) == "function" and type(label.SetFont) == "function") then
-        local ok, face, oldSize, flags = pcall(GameFontNormal.GetFont, GameFontNormal);
-        if (ok and type(face) == "string" and face ~= "") then pcall(label.SetFont, label, face, size, flags or ""); end
-    end
+    setWidgetFont(label, size);
     label:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y);
-    label:SetWidth(528);
-    label:SetHeight(34);
+    label:SetWidth(328);
+    label:SetHeight(size + 4);
     label:SetJustifyH("LEFT");
+    if (type(label.SetJustifyV) == "function") then label:SetJustifyV("TOP"); end
+    textColor(label, 0.88, 0.87, 0.83);
     bindText(label, text);
     return label;
 end
@@ -843,8 +921,123 @@ local function addButton(parent, name, text, x, y, width, callback)
     button:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y);
     if (I18n.catalogs.en[text]) then bindText(button, text);
     else button:SetText(text); end
+    setWidgetFont(button, 11);
     button:SetScript("OnClick", callback);
     return button;
+end
+
+local function placeWidget(widget, x, y, width, height)
+    widget:ClearAllPoints();
+    widget:SetPoint("TOPLEFT", panel, "TOPLEFT", x, -y);
+    widget:SetWidth(width); widget:SetHeight(height);
+end
+
+local function labelHeight(label, width)
+    label:SetWidth(width);
+    local size = label.speedGearTextSize or 11;
+    local measured = widgetValue(label, "GetStringHeight");
+    if (finiteNumber(measured) and measured > 0) then return math.ceil(math.max(size + 2, measured + 2)); end
+    local lines = math.max(1, math.ceil(textWidth(label) / math.max(1, width)));
+    return math.ceil(lines * (size + 3));
+end
+
+local function fitButton(button, available)
+    local width = math.min(available, math.max(44, math.ceil(textWidth(button) + 24)));
+    local font = widgetValue(button, "GetFontString");
+    local lines = math.max(1, math.ceil(textWidth(button) / math.max(1, width - 24)));
+    if (font and type(font.SetWidth) == "function") then
+        font:SetWidth(width - 24);
+        -- Clear the previous height before querying wrapped native text.
+        font:SetHeight(0);
+        local height = widgetValue(font, "GetStringHeight");
+        if (finiteNumber(height) and height > 0) then lines = math.max(lines, math.ceil(height / 14)); end
+    end
+    local height = math.max(24, lines * 14 + 8);
+    if (font and type(font.SetHeight) == "function") then font:SetHeight(height - 8); end
+    button:SetWidth(width); button:SetHeight(height);
+    button.speedGearWidth, button.speedGearHeight = width, height;
+    return width, height;
+end
+
+layoutPanel = function()
+    if (not panelWidgets or panel.speedGearDragging) then return; end
+    if (widgetValue(panel, "IsShown") == false) then return; end
+    panelDirty = false;
+    local w = panelWidgets;
+    w.details:SetText((detailsOpen and "- " or "+ ") .. tr("details"));
+    local closeWidth, closeHeight = fitButton(w.close, 160);
+    local width = math.max(360, math.ceil(textWidth(w.title) + closeWidth + 44));
+    local viewport = widgetValue(UIParent, "GetWidth");
+    if (finiteNumber(viewport) and viewport >= 280) then width = math.min(width, viewport - 24); end
+    local padding, gap, content = 16, 8, width - 32;
+    panel:SetWidth(width);
+    local function label(widget, y, labelWidth, x)
+        local height = labelHeight(widget, labelWidth or content);
+        placeWidget(widget, x or padding, y, labelWidth or content, height);
+        widget:Show();
+        return height;
+    end
+    local function buttonRow(buttons, y)
+        local x, rowHeight = padding, 0;
+        local _, button;
+        for _, button in ipairs(buttons) do
+            local bw, bh = fitButton(button, content);
+            if (x > padding and x + bw > width - padding) then
+                y = y + rowHeight + gap; x = padding; rowHeight = 0;
+            end
+            placeWidget(button, x, y, bw, bh);
+            x = x + bw + gap; rowHeight = math.max(rowHeight, bh);
+        end
+        return y + rowHeight;
+    end
+    local y = 14;
+    if (textWidth(w.title) + closeWidth + 12 > content) then
+        y = y + label(w.title, y) + 6;
+        placeWidget(w.close, width - padding - closeWidth, y, closeWidth, closeHeight);
+        y = y + closeHeight + 12;
+    else
+        local titleHeight = label(w.title, y + 2, content - closeWidth - 12);
+        placeWidget(w.close, width - padding - closeWidth, y, closeWidth, closeHeight);
+        y = y + math.max(titleHeight + 2, closeHeight) + 12;
+    end
+    y = y + label(statusLabel, y) + 4;
+    y = y + label(measurementLabel, y) + 12;
+    y = buttonRow(w.presets, y) + 12;
+
+    local customWidth = math.min(content, math.ceil(textWidth(w.customLabel)));
+    local customHeight = labelHeight(w.customLabel, customWidth);
+    local applyWidth, applyHeight = fitButton(w.apply, content);
+    if (customWidth + 56 + applyWidth + gap * 2 <= content) then
+        local rowHeight = math.max(26, customHeight, applyHeight);
+        label(w.customLabel, y + (rowHeight - customHeight) / 2, customWidth);
+        placeWidget(customBox, padding + customWidth + gap, y + (rowHeight - 26) / 2, 56, 26);
+        placeWidget(w.apply, padding + customWidth + gap * 2 + 56, y + (rowHeight - applyHeight) / 2, applyWidth, applyHeight);
+        y = y + rowHeight + 14;
+    else
+        y = y + label(w.customLabel, y) + 4;
+        placeWidget(customBox, padding, y, 56, 26);
+        placeWidget(w.apply, padding + 56 + gap, y, applyWidth, applyHeight);
+        y = y + math.max(26, applyHeight) + 14;
+    end
+    y = y + label(w.hotkeyTitle, y) + 5;
+    y = buttonRow({ hotkeyDownButton, hotkeyUpButton, w.reset }, y) + 4;
+    y = y + label(hotkeyHint, y) + 10;
+    if (noticeKey ~= "hint" or (controller.frameGuardTripped and controller.bridgeReady)) then
+        y = y + label(noticeLabel, y) + 10;
+    else noticeLabel:Hide(); end
+    local stopWidth, stopHeight = fitButton(w.stop, content);
+    local detailWidth, detailHeight = fitButton(w.details, content);
+    placeWidget(w.stop, padding, y, stopWidth, stopHeight);
+    if (stopWidth + detailWidth + gap > content) then y = y + stopHeight + gap; end
+    placeWidget(w.details, width - padding - detailWidth, y, detailWidth, detailHeight);
+    y = y + math.max(stopHeight, detailHeight);
+    if (detailsOpen) then
+        y = y + 12;
+        y = y + label(sendStatusLabel, y) + 6;
+        y = y + label(w.commands, y) + 6;
+        y = y + label(w.hint, y);
+    else sendStatusLabel:Hide(); w.commands:Hide(); w.hint:Hide(); end
+    panel:SetHeight(y + 16);
 end
 
 local function buildLauncher()
@@ -914,47 +1107,64 @@ end
 local function buildPanel()
     if (panel or type(CreateFrame) ~= "function" or not UIParent) then return; end
     panel = CreateFrame("Frame", "AZSSpeedGearPanel", UIParent);
-    panel:SetWidth(560);
-    panel:SetHeight(432);
+    panel:SetWidth(360);
+    panel:SetHeight(280);
     panel:SetPoint("CENTER", UIParent, "CENTER", 0, 0);
     panel:SetFrameStrata("DIALOG");
+    measureFont = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal");
+    measureFont:SetWidth(10000); measureFont:SetHeight(1000); measureFont:Hide();
     panel:SetMovable(true);
     panel:EnableMouse(true);
     panel:RegisterForDrag("LeftButton");
     panel:SetScript("OnHide", function() customTyping = false; stopHotkeyCapture(); end);
+    panel:SetScript("OnShow", function() panelDirty = true; if (layoutPanel) then layoutPanel(); end end);
     if (type(panel.SetClampedToScreen) == "function") then pcall(panel.SetClampedToScreen, panel, true); end
-    panel:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 16, insets = { left = 4, right = 4, top = 4, bottom = 4 } });
-    panel:SetBackdropColor(0.04, 0.06, 0.10, 0.96);
-    panel:SetScript("OnDragStart", function() this:StartMoving(); end);
+    panel:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = false, edgeSize = 12, insets = { left = 4, right = 4, top = 4, bottom = 4 } });
+    panel:SetBackdropColor(0.055, 0.05, 0.045, 0.97);
+    if (type(panel.CreateTexture) == "function") then
+        local fill = panel:CreateTexture(nil, "BACKGROUND");
+        fill:SetTexture("Interface\\Buttons\\WHITE8X8");
+        fill:SetVertexColor(0.055, 0.05, 0.045, 0.97);
+        fill:SetPoint("TOPLEFT", panel, "TOPLEFT", 5, -5);
+        fill:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -5, 5);
+    end
+    panel:SetScript("OnDragStart", function() this.speedGearDragging = true; this:StartMoving(); end);
     panel:SetScript("OnDragStop", function()
         this:StopMovingOrSizing();
+        this.speedGearDragging = false;
         local point, relative, relativePoint, x, y = this:GetPoint(1);
         local db = savedDatabase();
         db.point = point;
         db.relativePoint = relativePoint;
         db.x = x;
         db.y = y;
+        panelDirty = true; if (layoutPanel) then layoutPanel(); end
     end);
-    local title = addText(panel, 14, 16, -16, "title");
-    title:SetWidth(410);
-    addButton(panel, "AZSSpeedGearClose", "close", 440, -10, 104, function() setShown(false); end);
-    statusLabel = addText(panel, 12, 16, -50, "inactive");
-    measurementLabel = addText(panel, 11, 16, -86, "measurement_wait");
-    sendStatusLabel = addText(panel, 11, 16, -122, "send_file_only");
+    local w = {};
+    w.title = addText(panel, 13, 16, -16, "title");
+    textColor(w.title, 1, 0.82, 0.38);
+    w.close = addButton(panel, "AZSSpeedGearClose", "close", 0, 0, 44, function() setShown(false); end);
+    statusLabel = addText(panel, 12, 0, 0, "inactive");
+    measurementLabel = addText(panel, 11, 0, 0, "measurement_wait");
+    textColor(measurementLabel, 0.72, 0.70, 0.65);
+    sendStatusLabel = addText(panel, 10, 0, 0, "send_file_only");
+    textColor(sendStatusLabel, 0.72, 0.70, 0.65);
+    w.status, w.measurement, w.sending = statusLabel, measurementLabel, sendStatusLabel;
     local presets = { 50, 100, 200, 300, 500 };
+    w.presets = {};
     local i = 1;
     while (i <= table.getn(presets)) do
         local selected = presets[i];
-        addButton(panel, "AZSSpeedGearPreset" .. i, "x" .. speedText(selected), 16 + (i - 1) * 104, -164, 96,
-            function() requestSpeed(selected); end);
+        table.insert(w.presets, addButton(panel, "AZSSpeedGearPreset" .. i, "×" .. speedText(selected), 0, 0, 44,
+            function() requestSpeed(selected); end));
+        w.presets[i].speedGearValue = selected;
         i = i + 1;
     end
-    local customLabel = addText(panel, 11, 16, -216, "custom");
-    customLabel:SetWidth(270);
+    w.customLabel = addText(panel, 11, 0, 0, "custom");
     customBox = CreateFrame("EditBox", "AZSSpeedGearCustom", panel, "InputBoxTemplate");
-    customBox:SetWidth(70);
+    customBox:SetWidth(56);
     customBox:SetHeight(26);
-    customBox:SetPoint("TOPLEFT", panel, "TOPLEFT", 300, -208);
+    customBox:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, -120);
     customBox:SetAutoFocus(false);
     customBox:SetMaxLetters(6);
     customBox:SetText("1");
@@ -969,15 +1179,16 @@ local function buildPanel()
     customBox:SetScript("OnEditFocusLost", function() customTyping = false; end);
     customBox:SetScript("OnHide", function() customTyping = false; end);
     customBox:SetScript("OnEscapePressed", function() customTyping = false; this:ClearFocus(); end);
-    addButton(panel, "AZSSpeedGearApply", "apply", 390, -208, 140, submitCustom);
-    addButton(panel, "AZSSpeedGearStop", "stop", 16, -260, 528, emergencyStop);
-    local keyTitle = addText(panel, 10, 16, -298, "hotkeys_title");
-    keyTitle:SetWidth(64); keyTitle:SetHeight(30);
-    hotkeyDownButton = addButton(panel, "AZSSpeedGearHotkeyDown", "", 88, -298, 162,
+    w.customBox = customBox;
+    w.apply = addButton(panel, "AZSSpeedGearApply", "apply", 0, 0, 44, submitCustom);
+    w.stop = addButton(panel, "AZSSpeedGearStop", "stop", 0, 0, 44, emergencyStop);
+    w.hotkeyTitle = addText(panel, 10, 0, 0, "hotkeys_title");
+    textColor(w.hotkeyTitle, 1, 0.82, 0.38);
+    hotkeyDownButton = addButton(panel, "AZSSpeedGearHotkeyDown", "", 0, 0, 44,
         function() beginHotkeyCapture("down"); end);
-    hotkeyUpButton = addButton(panel, "AZSSpeedGearHotkeyUp", "", 258, -298, 162,
+    hotkeyUpButton = addButton(panel, "AZSSpeedGearHotkeyUp", "", 0, 0, 44,
         function() beginHotkeyCapture("up"); end);
-    local reset = addButton(panel, "AZSSpeedGearHotkeyReset", "hotkey_reset", 428, -298, 116, function()
+    local reset = addButton(panel, "AZSSpeedGearHotkeyReset", "hotkey_reset", 0, 0, 44, function()
         stopHotkeyCapture();
         if (keyManager) then
             local ok = keyManager:Reset();
@@ -985,30 +1196,28 @@ local function buildPanel()
         end
         refreshHotkeys();
     end);
-    local _, button;
-    for _, button in ipairs({ hotkeyDownButton, hotkeyUpButton, reset }) do
-        if (type(button.GetFontString) == "function") then
-            local font = button:GetFontString();
-            if (font and type(font.GetFont) == "function" and type(font.SetFont) == "function") then
-                local face, size, flags = font:GetFont();
-                if (type(face) == "string") then font:SetFont(face, 10, flags or ""); end
-            end
-            if (font and type(font.SetWidth) == "function") then
-                font:SetWidth((button == reset and 116 or 162) - 12);
-                font:SetHeight(24);
-            end
-        end
-    end
+    w.down, w.up, w.reset = hotkeyDownButton, hotkeyUpButton, reset;
     reset:SetScript("OnEnter", function()
         if (GameTooltip and type(GameTooltip.SetOwner) == "function") then
             GameTooltip:SetOwner(this, "ANCHOR_LEFT"); GameTooltip:SetText(tr("hotkey_reset")); GameTooltip:Show();
         end
     end);
     reset:SetScript("OnLeave", function() if (GameTooltip and type(GameTooltip.Hide) == "function") then GameTooltip:Hide(); end end);
-    hotkeyHint = addText(panel, 10, 16, -328, "hotkey_hint"); hotkeyHint:SetHeight(32);
-    noticeLabel = addText(panel, 11, 16, -366, "hint");
-    local commands = addText(panel, 10, 16, -402, "commands"); commands:SetHeight(20);
+    hotkeyHint = addText(panel, 10, 0, 0, "hotkey_hint");
+    textColor(hotkeyHint, 0.72, 0.70, 0.65);
+    noticeLabel = addText(panel, 11, 0, 0, "hint");
+    textColor(noticeLabel, 1, 0.82, 0.38);
+    w.hotkeyHint, w.notice = hotkeyHint, noticeLabel;
+    w.details = addButton(panel, "AZSSpeedGearDetails", "details", 0, 0, 44, function()
+        detailsOpen = not detailsOpen; panelDirty = true; layoutPanel();
+    end);
+    w.commands = addText(panel, 10, 0, 0, "commands");
+    w.hint = addText(panel, 10, 0, 0, "hint");
+    textColor(w.commands, 0.72, 0.70, 0.65); textColor(w.hint, 0.72, 0.70, 0.65);
+    panelWidgets = w;
+    Gear.panelWidgets = w;
     Gear.panel = panel;
+    refreshHotkeys(); layoutPanel();
 end
 
 local function loadSettings()
@@ -1048,6 +1257,8 @@ local function slash(message)
 end
 
 I18n.Listen(function()
+    panelDirty = true;
+    widthCache = {}; widthCacheCount = 0;
     local index = 1;
     while (index <= table.getn(captions)) do
         local entry = captions[index];

@@ -33,13 +33,18 @@ public static class AZSGHotkeyMouse {
         $match = [regex]::Match($Row.Payload, '^(AZSGH1\|[A-Za-z0-9_.|_-]{1,1800})(?:[^A-Za-z0-9_.|_-]|$)')
         if (-not $match.Success) { return $null }
         $p = $match.Groups[1].Value.Split('|')
-        if ($p.Count -ne 43) { return $null }
+        if ($p.Count -notin @(43,58)) { return $null }
         try {
             $r = [ordered]@{ fileTime=[long]$Row.FileTime; seq=[long]$p[1]; instance=[long]$p[2]; phase=$p[3]; desired=[int]$p[4]; speed=[int]$p[5]; guard=[int]$p[6]; active=[int]$p[7]; down=$p[8]; up=$p[9]; q=$p[10]; e=$p[11]; r=$p[12]; ctrlT=$p[13]; capture=[int]$p[14]; panel=[int]$p[15]; actions=[int]$p[16]; direction=[int]$p[17]; before=[int]$p[18]; after=[int]$p[19]; accepted=[int]$p[20]; frames=[int]$p[21]; rawT=[double]::Parse($p[22],[Globalization.CultureInfo]::InvariantCulture); chat=[int]$p[23]; menu=[int]$p[24] }
             $names = @('launcher','downButton','upButton','closeButton','stopButton')
             for ($i=0; $i -lt 5; $i++) { $r[$names[$i]] = @([double]::Parse($p[25+$i*2],[Globalization.CultureInfo]::InvariantCulture), [double]::Parse($p[26+$i*2],[Globalization.CultureInfo]::InvariantCulture)) }
             $r.captureKey=$p[35]; $r.captureCtrl=$p[36]; $r.captureShift=$p[37]; $r.captureAlt=$p[38]; $r.currentCtrl=$p[39]; $r.captureEvents=[int]$p[40]
             $r.originalQ=$p[41]; $r.originalE=$p[42]
+            if($p.Count -eq 58){
+                $layoutNames=@('panelWidth','panelHeight','stopWidth','stopTextWidth','closeWidth','closeTextWidth','downWidth','downTextWidth','upWidth','upTextWidth','boundsViolations','overlaps','detailsShown')
+                for($i=0;$i -lt $layoutNames.Count;$i++){$r[$layoutNames[$i]]=[double]::Parse($p[43+$i],[Globalization.CultureInfo]::InvariantCulture)}
+                $r.detailsButton=@([double]::Parse($p[56],[Globalization.CultureInfo]::InvariantCulture),[double]::Parse($p[57],[Globalization.CultureInfo]::InvariantCulture))
+            }
             return [pscustomobject]$r
         } catch { return $null }
     }
@@ -285,12 +290,23 @@ public static class AZSGHotkeyMouse {
         $script:hk.phase='panel_rebind_ready'; Start-HotkeySession 2 -ReadyOnly
         Assert-Hotkey 'configuration_ready' ($script:hk.current.phase -ceq 'ready' -and $script:hk.current.active -eq 0) $script:hk.current
         Click-Hotkey 'launcher'; Wait-Hotkey 'panel_opened' { $script:hk.current.panel -eq 1 }
+        $compact=$script:hk.current
+        Assert-Hotkey 'compact_panel_native_geometry' ($compact.panelWidth -gt 0 -and $compact.panelWidth -lt 500 -and $compact.panelHeight -gt 0 -and $compact.panelHeight -lt 432 -and $compact.boundsViolations -eq 0 -and $compact.overlaps -eq 0) $compact
+        foreach($name in @('stop','close','down','up')){
+            $actual=$compact.($name+'Width');$textWidth=$compact.($name+'TextWidth')
+            $expected=[Math]::Max(44,[Math]::Ceiling($textWidth+24))
+            Assert-Hotkey ('native_text_sized_'+$name) ($textWidth -gt 0 -and [Math]::Abs($actual-$expected) -le 1.01) $compact
+        }
+        Click-Hotkey 'detailsButton'; Wait-Hotkey 'details_expanded' { $script:hk.current.detailsShown -eq 1 -and $script:hk.current.panelHeight -gt $compact.panelHeight }
+        Click-Hotkey 'detailsButton'; Wait-Hotkey 'details_collapsed' { $script:hk.current.detailsShown -eq 0 -and [Math]::Abs($script:hk.current.panelHeight-$compact.panelHeight) -le 1 }
         Open-HotkeyCapture 'downButton' 'record_down_opened'
         Tap-Hotkey 0x52; Wait-Hotkey 'record_down_r' { $script:hk.current.down -ceq 'R' -and $script:hk.current.capture -eq 0 -and $script:hk.current.r -ceq 'AZSG_SLOWER' }
         Open-HotkeyCapture 'upButton' 'record_up_opened'
         Tap-Hotkey 0x54 0x11; Wait-Hotkey 'record_up_ctrl_t' { $script:hk.current.up -ceq 'CTRL-T' -and $script:hk.current.capture -eq 0 -and $script:hk.current.ctrlT -ceq 'AZSG_FASTER' }
         Assert-Hotkey 'old_q_binding_restored' ($script:hk.current.q -ceq $script:hk.current.originalQ -and $script:hk.current.q -cne 'AZSG_SLOWER') $script:hk.current
         Assert-Hotkey 'old_e_binding_restored' ($script:hk.current.e -ceq $script:hk.current.originalE -and $script:hk.current.e -cne 'AZSG_FASTER') $script:hk.current
+        $rebound=$script:hk.current
+        Assert-Hotkey 'rebound_layout_native_geometry' ($rebound.boundsViolations -eq 0 -and $rebound.overlaps -eq 0 -and [Math]::Abs($rebound.upWidth-[Math]::Max(44,[Math]::Ceiling($rebound.upTextWidth+24))) -le 1.01) $rebound
         Capture-Hotkey 1
         Click-Hotkey 'closeButton'; Wait-Hotkey 'panel_hidden' { $script:hk.current.panel -eq 0 }
         Begin-HotkeyCombat 'configured'

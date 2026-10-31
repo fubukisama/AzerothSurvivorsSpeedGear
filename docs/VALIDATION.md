@@ -1,5 +1,21 @@
 # Validation — updated 2026-10-31
 
+## Version 0.7.4 compact localized panel
+
+The panel uses native localized font measurements plus consistent padding for
+button sizes. An unconstrained hidden measuring label prevents wrapped text
+from shrinking a button on subsequent layout passes. Width measurements are
+bounded and cached; hidden panels defer reflow, and dragging defers resizing.
+Rows wrap for long key chords and narrow viewports. Diagnostic text expands
+below the controls instead of occupying the main layout. The restore button
+is a normal text-sized action. Native preset highlighting follows the request.
+
+The production UI fixture uses distinct native-font metric stubs and checks
+all fourteen languages for visible-control bounds, nonoverlap, text fit,
+detail expansion/collapse, long-chord growth and reset shrinkage, and a narrow
+viewport. Real-game acceptance also records independent native text widths and
+button geometry, and physically clicks the details toggle before rebinding.
+
 ## Version 0.7.3 continuous measured confirmation
 
 Remote [run 41188103962](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41188103962)
