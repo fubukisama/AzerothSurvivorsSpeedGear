@@ -3,7 +3,7 @@
 function Invoke-HotkeyAcceptance([string]$GameRoot, [string]$Assets, [string]$OfficialExe) {
     if ($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows') { throw 'blocked_remote_only' }
     $script:hk = [ordered]@{ schema=1; status='blocked'; reason='not_started'; phase='provision'; criteria=@(); sessions=@();
-        current=$null; session=$null; rows=$null; native=$null; input=$null; exceptionType=$null; errorLine=$null;
+        current=$null; session=$null; rows=$null; native=$null; nativeLog=$null; nativeLogSeen=$null; input=$null; exceptionType=$null; errorLine=$null;
         choiceHeld=$false; choiceStart=0L; choiceFrame=0; choiceLast=0L; choiceAttempts=0;
         scope='Physical SendInput into one official game build. Native acknowledgements prove delivery, not uniform movement or skill timing.' }
     $mouseSource = @'
@@ -53,6 +53,15 @@ public static class AZSGHotkeyMouse {
         if ($snapshot.statusAvailable -and ($script:hk.native.Count -eq 0 -or $script:hk.native[$script:hk.native.Count-1].speed100 -ne $snapshot.speed100)) {
             $script:hk.native.Add([pscustomobject]@{fileTime=[AZSGRemoteGame]::Wall(); speed100=$snapshot.speed100; backend=$snapshot.backend; transport=$snapshot.transport})
         }
+        foreach ($line in $snapshot.safeLog) {
+            $change=[regex]::Match($line,'^speed100=([0-9]{1,4}) simulation_calls=([0-9]{1,20})$')
+            if ($change.Success -and $script:hk.nativeLogSeen.Add([string]$line)) {
+                # Exact normalized text includes the monotonic simulation-call
+                # count. Existing lines are observed by the pre-action drain;
+                # only a previously unseen change can acknowledge a new input.
+                $script:hk.nativeLog.Add([pscustomobject]@{fileTime=[AZSGRemoteGame]::Wall(); speed100=[int]$change.Groups[1].Value; simulationCalls=[ulong]$change.Groups[2].Value; backend=$snapshot.backend; message=[string]$line})
+            }
+        }
         if ($script:hk.session.Child.HasExited) { throw 'blocked_game_exited' }
         # Resolve the game's own level-choice modal with real number-key input.
         # Never send a choice key while the plugin is recording a binding. Keep
@@ -79,11 +88,14 @@ public static class AZSGHotkeyMouse {
         $script:hk.criteria += [pscustomobject]@{name=$Name; passed=$Okay; observed=$Observed}
         if (-not $Okay) { throw ('failed_' + $Name) }
     }
-    function Wait-Hotkey([string]$Name,[scriptblock]$Condition,[int]$Seconds=12) {
+    function Wait-Hotkey([string]$Name,[scriptblock]$Condition,[int]$Seconds=12,[scriptblock]$Evidence=$null) {
         $until=[AZSGRemoteGame]::Wall()+$Seconds*10000000L
         do {
             Drain-Hotkey
-            if ($null -ne $script:hk.current -and (& $Condition)) { Assert-Hotkey $Name $true $script:hk.current; return }
+            if ($null -ne $script:hk.current -and (& $Condition)) {
+                $observed=if ($null -ne $Evidence) { & $Evidence } else { $script:hk.current }
+                Assert-Hotkey $Name $true $observed; return
+            }
             Start-Sleep -Milliseconds 50
         } while ([AZSGRemoteGame]::Wall() -lt $until)
         if ($null -ne $script:hk.current -and $script:hk.current.phase -ceq 'choosing') { throw 'blocked_level_choice_modal' }
@@ -163,7 +175,25 @@ public static class AZSGHotkeyMouse {
         $script:hk.actionStarted=[AZSGRemoteGame]::Wall()
         Tap-Hotkey $Key $Modifier
         Wait-Hotkey ($Name+'_dispatch') { $script:hk.current.actions -eq $script:hk.previousActions+1 -and $script:hk.current.direction -eq $Direction -and $script:hk.current.after -eq $Expected -and $script:hk.current.accepted -eq 1 }
-        Wait-Hotkey ($Name+'_native') { @($script:hk.native | Where-Object { $_.fileTime -ge $script:hk.actionStarted -and $_.speed100 -eq $Expected -and $_.backend -ceq 'ready' }).Count -gt 0 }
+        $script:hk.nativeAckEvidence=$null
+        Wait-Hotkey ($Name+'_native') {
+            $status=@($script:hk.native | Where-Object { $_.fileTime -ge $script:hk.actionStarted -and $_.speed100 -eq $Expected -and $_.backend -ceq 'ready' })
+            if ($status.Count -gt 0) {
+                $script:hk.nativeAckEvidence=[pscustomobject]@{source='status'; actionStarted=$script:hk.actionStarted; observation=$status[-1]}
+                return $true
+            }
+            # The 1s diagnostic publisher may skip a short 2x interval before
+            # the real low-frame-rate guard restores 1x. A fresh native change
+            # log proves that transition; stable 0.5x/1x still require status.
+            if ($Expected -eq 200) {
+                $changes=@($script:hk.nativeLog | Where-Object { $_.fileTime -ge $script:hk.actionStarted -and $_.speed100 -eq 200 -and $_.backend -ceq 'ready' })
+                if ($changes.Count -gt 0) {
+                    $script:hk.nativeAckEvidence=[pscustomobject]@{source='change_log'; actionStarted=$script:hk.actionStarted; observation=$changes[-1]}
+                    return $true
+                }
+            }
+            return $false
+        } 12 { $script:hk.nativeAckEvidence }
     }
     function Unused-Hotkey([string]$Name,[uint16]$Key) {
         Drain-Hotkey; $count=$script:hk.current.actions; $frame=$script:hk.current.frames
@@ -173,6 +203,7 @@ public static class AZSGHotkeyMouse {
     }
     function Start-HotkeySession([int]$Number) {
         $script:hk.current=$null; $script:hk.rows=[Collections.Generic.List[object]]::new(); $script:hk.native=[Collections.Generic.List[object]]::new(); $script:hk.input=[Collections.Generic.List[object]]::new()
+        $script:hk.nativeLog=[Collections.Generic.List[object]]::new(); $script:hk.nativeLogSeen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         $script:hk.choiceHeld=$false; $script:hk.choiceStart=0L; $script:hk.choiceFrame=0; $script:hk.choiceLast=0L; $script:hk.choiceAttempts=0
         $info=[Diagnostics.ProcessStartInfo]::new((Join-Path $GameRoot 'AzerothSurvivors.exe'))
         $info.WorkingDirectory=$GameRoot; $info.UseShellExecute=$false; $info.CreateNoWindow=$true; $info.RedirectStandardOutput=$true; $info.RedirectStandardError=$true
@@ -203,7 +234,7 @@ public static class AZSGHotkeyMouse {
         if ($script:hk.choiceHeld -and -not $script:hk.session.Child.HasExited) { Key-Hotkey 0x31 $false; $script:hk.choiceHeld=$false }
         $game=$script:hk.session.Child; $clean=$false
         if ($Graceful -and -not $game.HasExited) { [void]$game.CloseMainWindow(); $clean=$game.WaitForExit(30000) }
-        $script:hk.sessions += [pscustomobject]@{number=$Number; gracefulExit=$clean; softwareAdapterObserved=$script:hk.session.SoftwareObserved; panicked=$script:hk.session.Panicked; gpuFailure=$script:hk.session.GpuFailure; startupCategories=@($script:hk.session.StartupCategories); droppedTelemetry=$script:hk.session.Dropped; loadingClearObserved=$script:hk.session.LoadingClearObserved; inputs=$script:hk.input.ToArray(); samples=$script:hk.rows.ToArray(); nativeTransitions=$script:hk.native.ToArray()}
+        $script:hk.sessions += [pscustomobject]@{number=$Number; gracefulExit=$clean; softwareAdapterObserved=$script:hk.session.SoftwareObserved; panicked=$script:hk.session.Panicked; gpuFailure=$script:hk.session.GpuFailure; startupCategories=@($script:hk.session.StartupCategories); droppedTelemetry=$script:hk.session.Dropped; loadingClearObserved=$script:hk.session.LoadingClearObserved; inputs=$script:hk.input.ToArray(); samples=$script:hk.rows.ToArray(); nativeTransitions=$script:hk.native.ToArray(); nativeLogEvents=$script:hk.nativeLog.ToArray()}
         $script:hk.session.Dispose(); $script:hk.session=$null
         if ($Graceful) { Assert-Hotkey ('session'+$Number+'_graceful_exit') $clean $clean }
     }
