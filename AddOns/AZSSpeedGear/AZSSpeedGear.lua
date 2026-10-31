@@ -293,11 +293,17 @@ function Gear.NewController(api)
         end
         local target = self.speed100 / 100;
         local epsilon = 1e-8 * math.max(1, target);
+        -- A contained conservative interval is stronger evidence than a point
+        -- trend: sparse arrivals can bias bucket centers even when every
+        -- feasible rate still matches the target. Never let that point veto
+        -- current interval proof. Only use a recent trend to deny retained
+        -- confidence while the interval is too wide to confirm afresh.
+        local intervalContained = self.measured and upper and lower >= target * 0.90 - epsilon
+            and upper <= target * 1.10 + epsilon;
         -- Older matching observations can still fit a gradual rate change.
-        -- A recent raw trend may conservatively revoke that confidence, never
-        -- grant it. Use up to four completed centers (at least three), without
-        -- clamping their independent slope to the longer interval. Noisy
-        -- arrivals can therefore cause a pending result, not false success.
+        -- Use up to four completed centers (at least three), without clamping
+        -- their independent slope to the longer interval. This trend can only
+        -- revoke the wide-interval grace period; it never grants confirmation.
         local recentEstimate = nil;
         local recentFirst = math.max(2, count - 4);
         if (count - recentFirst >= 3) then
@@ -320,8 +326,7 @@ function Gear.NewController(api)
             and (recentEstimate < target * 0.90 - epsilon or recentEstimate > target * 1.10 + epsilon);
         local outside = lower > target * 1.10 + epsilon or (upper and upper < target * 0.90 - epsilon);
         self.measurementMismatch = outside and true or false;
-        local contained = not recentOutside and self.measured and upper and lower >= target * 0.90 - epsilon
-            and upper <= target * 1.10 + epsilon;
+        local contained = intervalContained;
         if (contained) then
             -- A live sliding window refreshes confidence without discarding the
             -- very observations that established it. There is no 12s restart.

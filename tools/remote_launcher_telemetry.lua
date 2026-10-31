@@ -105,7 +105,13 @@ emit = function()
         .. "|" .. string.format("%.0f", number(safe(time)))
         .. "|" .. string.format("%.6f", number(controller.measurementLower))
         .. "|" .. string.format("%.6f", number(controller.measurementUpper))
-        .. "|" .. storeOptionAttempts .. "|" .. storeOptionPcallOk;
+        .. "|" .. storeOptionAttempts .. "|" .. storeOptionPcallOk
+        -- Preserve the production sampler's own wall bucket and accepted raw
+        -- stamp. The separately sampled client clock is health diagnostics;
+        -- it is hooked/scaled and never supplies independent elapsed time.
+        .. "|" .. string.format("%.0f", number(controller.measureFrameWall))
+        .. "|" .. string.format("%.6f", number(controller.rawRunUpdated))
+        .. "|" .. string.format("%.6f", number(safe(GetTime)));
     SetCVar(cvar, payload); ConsoleExec(cvar);
 end;
 frame:RegisterEvent("PLAYER_ENTERING_WORLD");
