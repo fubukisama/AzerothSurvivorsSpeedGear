@@ -198,9 +198,15 @@ function Gear.NewController(api)
         -- GetTime nor the requested multiplier as an elapsed-time scale.
         if (not finiteNumber(clock) or clock < updated) then self:ResetMeasurement(); return; end
         if (self.rawRunValue == nil) then seedMeasurementSample(now, run, updated); return; end
-        if ((self.measureFrameWall and (now < self.measureFrameWall or now - self.measureFrameWall >= 2))
+        local wallGap = self.measureFrameWall and now - self.measureFrameWall or 0;
+        local positiveFresh = run > self.rawRunValue;
+        -- Integer stamps can jump by two across a shorter UI hitch. A fresh
+        -- positive sample still fits the pairwise coarse-time bounds; it is not
+        -- an observed stall. Nonpositive stale observations still clear history.
+        if (wallGap < 0 or wallGap >= 3
             or run < self.rawRunValue or updated < self.rawRunUpdated
-            or not self.rawProgressAt or now - self.rawProgressAt >= 2) then
+            or not self.rawProgressAt
+            or (now - self.rawProgressAt >= 2 and not (positiveFresh and wallGap <= 2))) then
             self:ResetMeasurement(); seedMeasurementSample(now, run, updated); return;
         end
         self.measureFrameWall = now;
