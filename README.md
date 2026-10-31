@@ -1,5 +1,18 @@
 # AzerothSurvivorsSpeedGear
 
+Version 0.7.0 adds configurable in-game speed hotkeys. **Q** steps down and **E**
+steps up through 0.25x, 0.5x, 1x, 2x, 3x, 5x and 10x. Endpoints hold their value;
+custom rates step to the nearest lower or higher preset. Click either hotkey
+button in the panel and press a new key or modifier chord. Esc cancels, Backspace
+clears the assignment, and Reset Q/E restores defaults. Assignments are saved
+with the addon. Closing the panel keeps the hotkeys active. Chat and this panel's
+text field suppress speed changes while typing.
+
+The addon uses the client's native bindings dispatcher and a separate
+`Bindings.xml`. It temporarily restores the original key map around game binding
+saves, and restores still-owned keys on reassignment or world exit. It never
+keeps a keyboard-capturing frame enabled outside the explicit key-recording mode.
+
 Version 0.6.3 adds low-frame-rate protection. While accelerating, three consecutive
 client frame intervals above 250 ms request a return to 1x and show a localized
 notice. The request stays at 1x until you choose a speed again; it does not

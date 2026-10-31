@@ -1,0 +1,4 @@
+<Bindings>
+    <Binding name="AZSG_SLOWER" hidden="true">AZSSpeedGear.StepHotkey(-1)</Binding>
+    <Binding name="AZSG_FASTER" hidden="true">AZSSpeedGear.StepHotkey(1)</Binding>
+</Bindings>

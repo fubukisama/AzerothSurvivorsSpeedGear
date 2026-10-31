@@ -1,5 +1,17 @@
 # Validation — updated 2026-10-31
 
+## Version 0.7.0 configurable hotkeys
+
+Lua 5.0 fixtures exercise the real hotkey manager, production UI callbacks and
+the actual `Bindings.xml` bodies. Coverage includes the complete non-wrapping
+speed ladder, custom intermediate values, default Q/E, modifiers, duplicate
+rejection, clearing/reset, hidden-panel operation, chat/custom text focus,
+recording cancellation, restored original bindings, transactional failures,
+synchronous binding events and restoration around SaveBindings (including errors
+and multiple return values). Fourteen locale catalogs include the new controls.
+These automated fixtures run only in remote CI; they do not constitute a new
+real-game visual or physical-key acceptance run.
+
 ## Version 0.6.3 frame-interval protection
 
 The old controller failed the new remote

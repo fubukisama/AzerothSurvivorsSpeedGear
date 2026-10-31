@@ -398,6 +398,13 @@ local lastLocaleSecond = nil;
 local lastLauncherText = nil;
 local lastFrameGuardNotice = false;
 local lastNoticeText = nil;
+local keyManager = nil;
+local hotkeyDownButton, hotkeyUpButton, hotkeyHint;
+local captureAction = nil;
+local hotkeyError = nil;
+local lastHotkeyText = nil;
+local customTyping = false;
+local saveBindingsWrapped = false;
 
 local function bindText(widget, key)
     table.insert(captions, { widget = widget, key = key });
@@ -460,6 +467,46 @@ local function savedDatabase()
     return AZSSpeedGearDB;
 end
 
+local function refreshHotkeys()
+    if (not keyManager or not hotkeyDownButton) then return; end
+    local down, up = keyManager:GetKey("down"), keyManager:GetKey("up");
+    local downText = string.format(tr("hotkey_down"), down == "" and tr("hotkey_unbound") or down);
+    local upText = string.format(tr("hotkey_up"), up == "" and tr("hotkey_unbound") or up);
+    if (captureAction == "down") then downText = "…"; end
+    if (captureAction == "up") then upText = "…"; end
+    local hint = tr(hotkeyError or (captureAction and "hotkey_listening") or
+        (not keyManager:Available() and "hotkey_unsupported") or "hotkey_hint");
+    local signature = downText .. upText .. hint;
+    if (signature ~= lastHotkeyText) then
+        hotkeyDownButton:SetText(downText); hotkeyUpButton:SetText(upText);
+        hotkeyHint:SetText(hint); lastHotkeyText = signature;
+    end
+end
+
+local function stopHotkeyCapture()
+    captureAction = nil; hotkeyError = nil;
+    if (panel) then
+        panel:SetScript("OnKeyDown", nil);
+        if (type(panel.EnableKeyboard) == "function") then panel:EnableKeyboard(false); end
+    end
+    refreshHotkeys();
+end
+
+local function prepareHotkeys(db)
+    if (not keyManager and type(AZSSpeedGearHotkeys) == "table") then
+        local api = {};
+        if (type(GetBindingAction) == "function") then api.getBinding = GetBindingAction; end
+        if (type(SetBinding) == "function") then api.setBinding = SetBinding; end
+        keyManager = AZSSpeedGearHotkeys.NewManager(api, db);
+        Gear.hotkeys = keyManager;
+    end
+    if (keyManager and not saveBindingsWrapped and type(SaveBindings) == "function") then
+        local originalSave = SaveBindings;
+        SaveBindings = function(...) return keyManager:WithBaseBindings(originalSave, unpack(arg)); end;
+        saveBindingsWrapped = true;
+    end
+end
+
 local function validPosition(point, relativePoint, x, y)
     local points = { TOPLEFT = true, TOP = true, TOPRIGHT = true, LEFT = true, CENTER = true, RIGHT = true, BOTTOMLEFT = true, BOTTOM = true, BOTTOMRIGHT = true };
     return type(point) == "string" and type(relativePoint) == "string" and points[point] and points[relativePoint]
@@ -475,7 +522,14 @@ end
 local function setShown(shown)
     local db = savedDatabase();
     db.show = shown and true or false;
-    if (panel) then if (db.show) then panel:Show(); else panel:Hide(); end end
+    if (panel) then
+        if (db.show) then panel:Show();
+        else
+            customTyping = false;
+            if (customBox and type(customBox.ClearFocus) == "function") then customBox:ClearFocus(); end
+            stopHotkeyCapture(); panel:Hide();
+        end
+    end
 end
 
 local function sendingText()
@@ -486,6 +540,7 @@ end
 
 local function render()
     updateLauncher();
+    refreshHotkeys();
     local guardNotice = controller.frameGuardTripped and controller.bridgeReady;
     if (guardNotice and controller.active and not lastFrameGuardNotice) then chat(tr("frame_guard")); end
     lastFrameGuardNotice = controller.frameGuardTripped and true or false;
@@ -538,12 +593,67 @@ local function render()
 end
 
 local function requestSpeed(value)
-    if (controller:RequestSpeed(value)) then
+    local sent = controller:RequestSpeed(value);
+    if (sent) then
         noticeKey = "switching";
     else
         noticeKey = "invalid_speed";
     end
     render();
+    return sent;
+end
+
+local function shown(widget)
+    if (not widget or type(widget.IsShown) ~= "function") then return false; end
+    local ok, visible = pcall(widget.IsShown, widget);
+    return ok and (visible == true or visible == 1);
+end
+
+function Gear.StepHotkey(direction)
+    if (not dbReady or not worldActive or captureAction or customTyping or
+        shown(ChatFrameEditBox) or shown(ChatFrame1EditBox) or shown(GameMenuFrame)) then return false; end
+    if (not keyManager or not keyManager.active or type(AZSSpeedGearHotkeys) ~= "table") then return false; end
+    controller:Update();
+    if (not controller.active) then return false; end
+    local nextSpeed = AZSSpeedGearHotkeys.NextSpeed(controller.desiredSpeed100, direction);
+    if (nextSpeed == controller.desiredSpeed100) then return false; end
+    return requestSpeed(nextSpeed);
+end
+
+local function modifier(fn)
+    local value = safeCall(fn);
+    return value == true or value == 1;
+end
+
+local function captureHotkey()
+    local key = string.upper(arg1 or "");
+    if (key == "ESCAPE") then stopHotkeyCapture(); return; end
+    if (key == "UNKNOWN" or key == "SHIFT" or key == "CTRL" or key == "CONTROL" or key == "ALT"
+        or key == "LSHIFT" or key == "RSHIFT" or key == "LCTRL" or key == "RCTRL"
+        or key == "LALT" or key == "RALT") then return; end
+    if (key == "BACKSPACE") then key = "";
+    else
+        if (modifier(IsShiftKeyDown)) then key = "SHIFT-" .. key; end
+        if (modifier(IsControlKeyDown)) then key = "CTRL-" .. key; end
+        if (modifier(IsAltKeyDown)) then key = "ALT-" .. key; end
+    end
+    local ok, reason = keyManager:SetKey(captureAction, key);
+    if (ok) then stopHotkeyCapture();
+    else hotkeyError = reason == "duplicate" and "hotkey_duplicate" or "hotkey_unsupported"; refreshHotkeys(); end
+end
+
+local function beginHotkeyCapture(action)
+    stopHotkeyCapture();
+    if (not keyManager or not keyManager:Available() or not panel or type(panel.EnableKeyboard) ~= "function") then
+        hotkeyError = "hotkey_unsupported"; refreshHotkeys(); return;
+    end
+    customTyping = false;
+    if (customBox and type(customBox.ClearFocus) == "function") then customBox:ClearFocus(); end
+    if (ChatFrameEditBox and type(ChatFrameEditBox.ClearFocus) == "function") then ChatFrameEditBox:ClearFocus(); end
+    if (ChatFrame1EditBox and type(ChatFrame1EditBox.ClearFocus) == "function") then ChatFrame1EditBox:ClearFocus(); end
+    captureAction = action;
+    panel:SetScript("OnKeyDown", captureHotkey); panel:EnableKeyboard(true);
+    refreshHotkeys();
 end
 
 local function emergencyStop()
@@ -641,12 +751,13 @@ local function buildPanel()
     if (panel or type(CreateFrame) ~= "function" or not UIParent) then return; end
     panel = CreateFrame("Frame", "AZSSpeedGearPanel", UIParent);
     panel:SetWidth(560);
-    panel:SetHeight(384);
+    panel:SetHeight(432);
     panel:SetPoint("CENTER", UIParent, "CENTER", 0, 0);
     panel:SetFrameStrata("DIALOG");
     panel:SetMovable(true);
     panel:EnableMouse(true);
     panel:RegisterForDrag("LeftButton");
+    panel:SetScript("OnHide", function() customTyping = false; stopHotkeyCapture(); end);
     if (type(panel.SetClampedToScreen) == "function") then pcall(panel.SetClampedToScreen, panel, true); end
     panel:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 16, insets = { left = 4, right = 4, top = 4, bottom = 4 } });
     panel:SetBackdropColor(0.04, 0.06, 0.10, 0.96);
@@ -687,14 +798,52 @@ local function buildPanel()
         local number = tonumber(customBox:GetText());
         if (finiteNumber(number)) then requestSpeed(number * 100);
         else noticeKey = "invalid_speed"; render(); end
-        customBox:ClearFocus();
+        customTyping = false; customBox:ClearFocus();
     end
     customBox:SetScript("OnEnterPressed", submitCustom);
-    customBox:SetScript("OnEscapePressed", function() this:ClearFocus(); end);
+    customBox:SetScript("OnEditFocusGained", function() customTyping = true; end);
+    customBox:SetScript("OnEditFocusLost", function() customTyping = false; end);
+    customBox:SetScript("OnHide", function() customTyping = false; end);
+    customBox:SetScript("OnEscapePressed", function() customTyping = false; this:ClearFocus(); end);
     addButton(panel, "AZSSpeedGearApply", "apply", 390, -208, 140, submitCustom);
     addButton(panel, "AZSSpeedGearStop", "stop", 16, -260, 528, emergencyStop);
-    noticeLabel = addText(panel, 11, 16, -306, "hint");
-    addText(panel, 10, 16, -348, "commands");
+    local keyTitle = addText(panel, 10, 16, -298, "hotkeys_title");
+    keyTitle:SetWidth(64); keyTitle:SetHeight(30);
+    hotkeyDownButton = addButton(panel, "AZSSpeedGearHotkeyDown", "", 88, -298, 162,
+        function() beginHotkeyCapture("down"); end);
+    hotkeyUpButton = addButton(panel, "AZSSpeedGearHotkeyUp", "", 258, -298, 162,
+        function() beginHotkeyCapture("up"); end);
+    local reset = addButton(panel, "AZSSpeedGearHotkeyReset", "hotkey_reset", 428, -298, 116, function()
+        stopHotkeyCapture();
+        if (keyManager) then
+            local ok = keyManager:Reset();
+            if (not ok) then hotkeyError = "hotkey_unsupported"; end
+        end
+        refreshHotkeys();
+    end);
+    local _, button;
+    for _, button in ipairs({ hotkeyDownButton, hotkeyUpButton, reset }) do
+        if (type(button.GetFontString) == "function") then
+            local font = button:GetFontString();
+            if (font and type(font.GetFont) == "function" and type(font.SetFont) == "function") then
+                local face, size, flags = font:GetFont();
+                if (type(face) == "string") then font:SetFont(face, 10, flags or ""); end
+            end
+            if (font and type(font.SetWidth) == "function") then
+                font:SetWidth((button == reset and 116 or 162) - 12);
+                font:SetHeight(24);
+            end
+        end
+    end
+    reset:SetScript("OnEnter", function()
+        if (GameTooltip and type(GameTooltip.SetOwner) == "function") then
+            GameTooltip:SetOwner(this, "ANCHOR_LEFT"); GameTooltip:SetText(tr("hotkey_reset")); GameTooltip:Show();
+        end
+    end);
+    reset:SetScript("OnLeave", function() if (GameTooltip and type(GameTooltip.Hide) == "function") then GameTooltip:Hide(); end end);
+    hotkeyHint = addText(panel, 10, 16, -328, "hotkey_hint"); hotkeyHint:SetHeight(32);
+    noticeLabel = addText(panel, 11, 16, -366, "hint");
+    local commands = addText(panel, 10, 16, -402, "commands"); commands:SetHeight(20);
     Gear.panel = panel;
 end
 
@@ -702,6 +851,7 @@ local function loadSettings()
     I18n.Refresh();
     local db = savedDatabase();
     dbReady = true;
+    prepareHotkeys(db);
     buildPanel();
     buildLauncher();
     if (panel and validPosition(db.point, db.relativePoint, db.x, db.y)) then
@@ -714,6 +864,7 @@ local function loadSettings()
     end
     setShown(db.show);
     showLauncher();
+    if (worldActive and keyManager) then keyManager:Apply(); end
     controller:Update();
     render();
 end
@@ -740,6 +891,7 @@ I18n.Listen(function()
         index = index + 1;
     end
     updateLauncher();
+    lastHotkeyText = nil;
     lastNoticeText = nil;
     lastRendered = nil;
     render();
@@ -759,6 +911,8 @@ if (type(CreateFrame) == "function") then
     driver:SetScript("OnEvent", function()
         if (event == "PLAYER_LOGOUT" or event == "PLAYER_LEAVING_WORLD") then
             worldActive = false;
+            stopHotkeyCapture();
+            if (keyManager) then keyManager:Release(); end
             showLauncher();
             controller:Shutdown();
             updateLauncher();
@@ -770,6 +924,7 @@ if (type(CreateFrame) == "function") then
             if (not dbReady) then loadSettings(); end
             showLauncher();
             controller:Update();
+            if (keyManager) then keyManager:Apply(); end
             render();
         end
     end);

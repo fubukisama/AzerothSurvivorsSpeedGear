@@ -728,7 +728,7 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
     if ($Mode -ceq 'hooked') {
         $addon = Join-Path $state 'AddOns\AZSSpeedGear'
         New-Item -ItemType Directory -Path $addon | Out-Null
-        foreach ($name in @('AZSSpeedGear.toc', 'NativeLocale.lua', 'Localization.lua', 'LocaleDetection.lua', 'AZSSpeedGear.lua')) {
+        foreach ($name in @('AZSSpeedGear.toc', 'NativeLocale.lua', 'Localization.lua', 'LocaleDetection.lua', 'Hotkeys.lua', 'AZSSpeedGear.lua', 'Bindings.xml')) {
             Copy-Item -LiteralPath (Join-Path $script:package ('AddOns\AZSSpeedGear\' + $name)) -Destination (Join-Path $addon $name)
         }
         Copy-Item -LiteralPath (Join-Path $script:package 'Native\dwmapi.dll') -Destination (Join-Path $GameRoot 'dwmapi.dll')
