@@ -20,8 +20,9 @@ $output = [IO.Path]::GetFullPath($OutputPath)
 if (-not $output.StartsWith($projectRoot + '\acceptance\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Report must be under this checkout acceptance directory.' }
 $utf8 = [Text.UTF8Encoding]::new($false, $true)
 $report = [ordered]@{ schema = 1; product = 'AzerothSurvivorsSpeedGear'; status = 'blocked'; reason = 'not_started'; phase = 'initialized'; exceptionType = $null; downloadDiagnostic = $null
-    checkedUtc = [DateTime]::UtcNow.ToString('o'); sourceCommit = $env:GITHUB_SHA; ciRunId = $env:GITHUB_RUN_ID
+    checkedUtc = [DateTime]::UtcNow.ToString('o'); sourceCommit = $null; ciRunId = $env:GITHUB_RUN_ID; workflowRepository = $env:GITHUB_REPOSITORY
     gameVersion = $null; gameSha256 = $null; gameBytes = $null; officialAssetsSha256 = $null; candidateDllSha256 = $null; pluginVersion = $null
+    gameSource = 'official_download'; privateBundleSha256 = $null; privateBundleBytes = $null
     renderingRequested = 'DX12 software fallback / Microsoft Basic Render Driver'; runs = @(); criteria = @(); metrics = $null; missingEvidence = @()
     scope = 'One official Windows build on a disposable software-rendered runner. No general gameplay or future-version certification.'
     clock = 'GetSystemTimePreciseAsFileTime in the unhooked parent process'
@@ -183,6 +184,179 @@ except Exception as error:
         $script:report.gameBytes = $result.identity.size
     }
     if ($pythonExit -ne 0 -or -not $result.ok) { throw 'blocked_download' }
+    return $result.identity
+}
+
+function Get-PrivateGameBundle {
+    # A private repository may download its own asset with its scoped job token
+    # and pass the RUNNER_TEMP file path. An optional URL is a short-lived secret;
+    # never put it in an argument, report, exception message or console output.
+    $python = @'
+import hashlib,json,os,re,stat,sys,threading,time,zipfile
+from pathlib import Path
+from urllib.parse import urlsplit
+from urllib.request import build_opener,HTTPRedirectHandler,Request
+from urllib.error import HTTPError,URLError
+stage='private_bundle_metadata'; total=0; attempts=0; identity=None
+emitted=False; emit_lock=threading.Lock(); watchdog=None
+def emit(value):
+    global emitted
+    with emit_lock:
+        if emitted: return False
+        emitted=True; print(json.dumps(value),flush=True); return True
+def diagnostic(category,error=None,http=None):
+    return {'stage':stage,'category':category,'exceptionType':type(error).__name__[:64] if error else 'TimeoutError','httpStatus':http,'bundleBytesReceived':total,'bundleAttempts':attempts}
+def expired():
+    if emit({'ok':False,'identity':identity,'diagnostic':diagnostic('timeout')}): os._exit(2)
+class BundlePolicyError(ValueError): pass
+def checked_url(value):
+    p=urlsplit(value)
+    if len(value)>16384 or p.scheme!='https' or p.hostname not in ('release-assets.githubusercontent.com','objects.githubusercontent.com') or p.port not in (None,443) or p.username or p.password or p.fragment or not p.path.startswith('/'):
+        raise BundlePolicyError('URL policy')
+    return value
+class BundleRedirects(HTTPRedirectHandler):
+    def redirect_request(self,req,fp,code,msg,headers,newurl):
+        return super().redirect_request(req,fp,code,msg,headers,checked_url(newurl))
+def pairs(values):
+    result={}
+    for key,value in values:
+        if key in result: raise BundlePolicyError('duplicate JSON key')
+        result[key]=value
+    return result
+def integer(value,minimum,maximum):
+    return type(value) is int and minimum<=value<=maximum
+def game_file(value):
+    return type(value) is str and (value=='AzerothSurvivors.exe' or re.fullmatch(r'Data/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.mpq',value,re.I) is not None)
+try:
+    maximum=4*1024*1024*1024; maximum_bundle=2*1024*1024*1024-1
+    expected=os.environ.get('AZSG_GAME_BUNDLE_SHA256','')
+    byte_text=os.environ.get('AZSG_GAME_BUNDLE_BYTES','')
+    if re.fullmatch(r'[a-f0-9]{64}',expected) is None or re.fullmatch(r'[0-9]{1,10}',byte_text) is None: raise BundlePolicyError('missing bundle identity')
+    expected_bytes=int(byte_text)
+    if not 1<=expected_bytes<=maximum_bundle: raise BundlePolicyError('bundle byte limit')
+    root=Path(sys.argv[1]); archive=root/'private-game-bundle.zip'
+    deadline=time.monotonic()+600
+    watchdog=threading.Timer(600,expired); watchdog.daemon=True; watchdog.start()
+    local=os.environ.get('AZSG_GAME_BUNDLE_PATH','')
+    if local:
+        stage='private_bundle_local_verify'
+        supplied=Path(local).absolute(); temporary=Path(os.environ['RUNNER_TEMP']).resolve()
+        archive=supplied.resolve()
+        if not archive.is_relative_to(temporary) or not archive.is_file(): raise BundlePolicyError('local bundle outside temporary root')
+        cursor=supplied
+        while cursor!=temporary:
+            if cursor.is_symlink() or cursor.is_junction(): raise BundlePolicyError('linked local bundle')
+            if cursor.parent==cursor: raise BundlePolicyError('local bundle ancestry')
+            cursor=cursor.parent
+        if archive.stat().st_size!=expected_bytes: raise BundlePolicyError('local bundle size')
+        digest=hashlib.sha256()
+        with archive.open('rb') as incoming:
+            while True:
+                if time.monotonic()>=deadline: raise TimeoutError('deadline')
+                chunk=incoming.read(65536)
+                if not chunk: break
+                total+=len(chunk)
+                if total>expected_bytes: raise BundlePolicyError('excess local bundle')
+                digest.update(chunk)
+        if total!=expected_bytes or digest.hexdigest()!=expected: raise BundlePolicyError('local archive digest')
+    else:
+        url=checked_url(os.environ.get('AZSG_GAME_BUNDLE_URL',''))
+        opener=build_opener(BundleRedirects())
+        for attempt in range(1,4):
+            attempts=attempt; total=0; digest=hashlib.sha256()
+            try:
+                stage='private_bundle_download'
+                remaining=deadline-time.monotonic()
+                if remaining<=0: raise TimeoutError('deadline')
+                request=Request(url,headers={'Accept-Encoding':'identity','User-Agent':'AzerothSurvivorsSpeedGear-private-acceptance/1'})
+                with opener.open(request,timeout=min(45,remaining)) as response,archive.open('wb') as output:
+                    checked_url(response.geturl())
+                    if response.status!=200 or response.headers.get('Content-Encoding','identity').lower()!='identity': raise BundlePolicyError('response policy')
+                    declared=response.headers.get('Content-Length')
+                    if declared is not None and (re.fullmatch(r'[0-9]+',declared) is None or int(declared)!=expected_bytes): raise BundlePolicyError('response size')
+                    read=getattr(response,'read1',response.read)
+                    while True:
+                        if time.monotonic()>=deadline: raise TimeoutError('deadline')
+                        chunk=read(65536)
+                        if not chunk: break
+                        total+=len(chunk)
+                        if total>expected_bytes: raise BundlePolicyError('excess response')
+                        digest.update(chunk); output.write(chunk)
+                if total!=expected_bytes: raise ConnectionError('incomplete response')
+                if digest.hexdigest()!=expected: raise BundlePolicyError('archive digest')
+                break
+            except (TimeoutError,URLError,ConnectionError) as error:
+                if isinstance(error,HTTPError) and error.code not in (408,429,500,502,503,504): raise
+                if attempt==3 or time.monotonic()>=deadline: raise
+                time.sleep(min(2*attempt,max(0,deadline-time.monotonic())))
+    stage='private_bundle_extract'
+    destination=root/'private-bundle'; destination.mkdir()
+    with zipfile.ZipFile(archive) as source:
+        entries={}; seen=set(); expanded=0
+        for entry in source.infolist():
+            name=entry.filename
+            if name.lower() in seen or entry.flag_bits&1: raise BundlePolicyError('duplicate or encrypted entry')
+            seen.add(name.lower())
+            kind=stat.S_IFMT(entry.external_attr>>16)
+            if kind not in (0,stat.S_IFREG,stat.S_IFDIR) or entry.external_attr&0x400: raise BundlePolicyError('linked entry')
+            if entry.is_dir():
+                if name!='Data/' or entry.file_size!=0: raise BundlePolicyError('directory entry')
+                continue
+            if kind==stat.S_IFDIR or (name!='bundle.json' and not game_file(name)): raise BundlePolicyError('entry path')
+            if entry.file_size<0 or entry.file_size>maximum: raise BundlePolicyError('entry size')
+            expanded+=entry.file_size
+            if expanded>maximum or len(entries)>=130: raise BundlePolicyError('expanded bounds')
+            entries[name]=entry
+        if 'bundle.json' not in entries or entries['bundle.json'].file_size>65536: raise BundlePolicyError('manifest bounds')
+        manifest=json.loads(source.read(entries['bundle.json']).decode('utf-8-sig'),object_pairs_hook=pairs,parse_constant=lambda value: (_ for _ in ()).throw(BundlePolicyError('nonfinite JSON')))
+        allowed_keys={'schema','product','gameVersion','gameSha256','gameBytes','files','createdUtc'}
+        if type(manifest) is not dict or not set(manifest)<=allowed_keys or type(manifest.get('schema')) is not int or manifest.get('schema')!=1 or manifest.get('product')!='AzerothSurvivorsPrivateTestBundle': raise BundlePolicyError('manifest identity')
+        version=manifest.get('gameVersion'); game_sha=manifest.get('gameSha256'); game_bytes=manifest.get('gameBytes'); files=manifest.get('files')
+        if type(version) is not str or re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+',version) is None or type(game_sha) is not str or re.fullmatch(r'[a-f0-9]{64}',game_sha) is None or not integer(game_bytes,1,512*1024*1024): raise BundlePolicyError('game identity')
+        if type(files) is not list or not 2<=len(files)<=129: raise BundlePolicyError('manifest file count')
+        expected_files={}
+        for item in files:
+            if type(item) is not dict or set(item)!=set(('path','bytes','sha256')): raise BundlePolicyError('manifest entry shape')
+            name=item['path']; size=item['bytes']; sha=item['sha256']
+            if not game_file(name) or name in expected_files or not integer(size,1,maximum) or type(sha) is not str or re.fullmatch(r'[a-f0-9]{64}',sha) is None: raise BundlePolicyError('manifest file identity')
+            expected_files[name]=(size,sha)
+        if set(expected_files)!=set(entries)-{'bundle.json'} or expected_files.get('AzerothSurvivors.exe')!=(game_bytes,game_sha): raise BundlePolicyError('exact manifest file set')
+        for name,(size,sha) in expected_files.items():
+            entry=entries[name]
+            if entry.file_size!=size: raise BundlePolicyError('ZIP entry size')
+            target=destination.joinpath(*name.split('/')); target.parent.mkdir(parents=True,exist_ok=True)
+            actual=hashlib.sha256(); count=0
+            with source.open(entry) as incoming,target.open('xb') as outgoing:
+                while True:
+                    if time.monotonic()>=deadline: raise TimeoutError('deadline')
+                    chunk=incoming.read(65536)
+                    if not chunk: break
+                    count+=len(chunk)
+                    if count>size: raise BundlePolicyError('expanded file bounds')
+                    actual.update(chunk); outgoing.write(chunk)
+            if count!=size or actual.hexdigest()!=sha: raise BundlePolicyError('expanded file digest')
+        if not any(name.startswith('Data/') for name in expected_files): raise BundlePolicyError('missing MPQs')
+    identity={'version':version,'sha256':game_sha,'size':game_bytes,'assetsSha256':None,'bundleSha256':expected,'bundleBytes':expected_bytes}
+    watchdog.cancel()
+    emit({'ok':True,'identity':identity,'diagnostic':{'stage':'complete','category':'none','exceptionType':None,'httpStatus':None,'bundleBytesReceived':total,'bundleAttempts':attempts,'fileCount':len(expected_files)}})
+except Exception as error:
+    if watchdog is not None: watchdog.cancel()
+    status=error.code if isinstance(error,HTTPError) and 100<=error.code<=599 else None
+    category='timeout' if isinstance(error,TimeoutError) else 'http' if status is not None else 'network' if isinstance(error,(URLError,ConnectionError)) else 'integrity' if isinstance(error,(BundlePolicyError,zipfile.BadZipFile)) else 'unexpected'
+    emit({'ok':False,'identity':identity,'diagnostic':diagnostic(category,error,status)})
+    sys.exit(2)
+'@
+    $PSNativeCommandUseErrorActionPreference = $false
+    $lines = @(& python -c $python $script:fixtureRoot 2>$null)
+    $pythonExit = $LASTEXITCODE
+    $script:report.downloadDiagnostic = [ordered]@{ stage = 'private_bundle_host'; category = 'no_bounded_json'; pythonExitCode = $pythonExit }
+    if ($lines.Count -ne 1 -or ([string]$lines[0]).Length -gt 2048) { throw 'blocked_private_bundle' }
+    try { $result = $lines[0] | ConvertFrom-Json } catch { throw 'blocked_private_bundle' }
+    if ($null -eq $result.PSObject.Properties['ok'] -or $result.ok -isnot [bool] -or
+        $null -eq $result.PSObject.Properties['diagnostic']) { throw 'blocked_private_bundle' }
+    $script:report.downloadDiagnostic = $result.diagnostic
+    $script:report.downloadDiagnostic | Add-Member -NotePropertyName pythonExitCode -NotePropertyValue $pythonExit
+    if ($pythonExit -ne 0 -or -not $result.ok) { throw 'blocked_private_bundle' }
     return $result.identity
 }
 
@@ -444,6 +618,12 @@ function Get-StageMetrics($Run, [int]$Stage) {
 
 try {
     New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
+    # A private asset repository can check out this plugin at a pinned commit;
+    # its workflow GITHUB_SHA names that other repository, not the plugin code.
+    $sourceIdentity = @(& git -C $projectRoot rev-parse HEAD 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $sourceIdentity.Count -ne 1 -or
+        $sourceIdentity[0] -cnotmatch '^[a-f0-9]{40}$') { throw 'blocked_source_identity' }
+    $report.sourceCommit = [string]$sourceIdentity[0]
     Add-Type -TypeDefinition $hostSource
     $report.candidateDllSha256 = (Get-FileHash -LiteralPath (Join-Path $package 'Native\dwmapi.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
     $packageToc = [IO.File]::ReadAllText((Join-Path $package 'AddOns\AZSSpeedGear\AZSSpeedGear.toc'), $utf8)
@@ -458,12 +638,24 @@ try {
         $script:knownGameStatePaths += $path
     }
     $report.phase = 'download'
-    $identity = Get-OfficialGame
+    $privateRequested = -not [string]::IsNullOrWhiteSpace($env:AZSG_GAME_BUNDLE_SHA256) -or
+        -not [string]::IsNullOrWhiteSpace($env:AZSG_GAME_BUNDLE_BYTES)
+    if ($privateRequested) {
+        $report.gameSource = 'private_local_bundle'
+        if ([string]::IsNullOrWhiteSpace($env:AZSG_GAME_BUNDLE_PATH) -and
+            [string]::IsNullOrWhiteSpace($env:AZSG_GAME_BUNDLE_URL)) { throw 'blocked_private_bundle_secret' }
+        $identity = Get-PrivateGameBundle
+        $report.privateBundleSha256 = $identity.bundleSha256; $report.privateBundleBytes = $identity.bundleBytes
+        $assets = Join-Path $fixtureRoot 'private-bundle\Data'
+        $officialExe = Join-Path $fixtureRoot 'private-bundle\AzerothSurvivors.exe'
+    } else {
+        $identity = Get-OfficialGame
+        $report.phase = 'assets'
+        $assets = Expand-OnlyOfficialAssets (Join-Path $fixtureRoot 'assets')
+        $officialExe = Join-Path $fixtureRoot 'official-game.exe'
+    }
     $report.gameVersion = $identity.version; $report.gameSha256 = $identity.sha256
     $report.gameBytes = $identity.size; $report.officialAssetsSha256 = $identity.assetsSha256
-    $report.phase = 'assets'
-    $assets = Expand-OnlyOfficialAssets (Join-Path $fixtureRoot 'assets')
-    $officialExe = Join-Path $fixtureRoot 'official-game.exe'
     foreach ($mode in @('baseline','hooked')) {
         $report.phase = $mode
         $run = Invoke-GameRun $mode (Join-Path $fixtureRoot $mode) $assets $officialExe

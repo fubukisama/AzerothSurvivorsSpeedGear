@@ -2,6 +2,17 @@ name: Disposable official game acceptance
 
 on:
   workflow_dispatch:
+    inputs:
+      bundle_sha256:
+        description: 'Optional SHA-256 of the private local game bundle; never enter its signed URL here.'
+        required: false
+        type: string
+        default: ''
+      bundle_bytes:
+        description: 'Exact compressed byte count of that private bundle.'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -33,6 +44,10 @@ jobs:
           "AZSG_ACCEPTANCE_PACKAGE=$($package.Package)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Run ephemeral official game with software rendering
         shell: pwsh
+        env:
+          AZSG_GAME_BUNDLE_URL: ${{ secrets.AZSG_GAME_BUNDLE_URL }}
+          AZSG_GAME_BUNDLE_SHA256: ${{ inputs.bundle_sha256 }}
+          AZSG_GAME_BUNDLE_BYTES: ${{ inputs.bundle_bytes }}
         run: ./tools/remote_game_acceptance.ps1 -PackagePath $env:AZSG_ACCEPTANCE_PACKAGE -OutputPath acceptance/report.json
       - name: Retain only our bounded numerical report
         if: always()

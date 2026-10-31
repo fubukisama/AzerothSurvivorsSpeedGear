@@ -47,3 +47,13 @@ the runner's independent OS timestamps. Missing graphics, input, fresh packets,
 stable movement or cooldown samples must produce a blocked metric, never a
 claim of successful gameplay verification. No game files or user saves are
 included in this repository or the published artifacts.
+
+When official downloads are unavailable, an explicitly authorized local game
+bundle can supply the same disposable runner. Its ZIP contains only the EXE,
+`Data/*.MPQ` and a file-hash manifest; configurations, saves and installed native
+mods are excluded. A temporary private repository can hold the bundle while its
+own short-lived workflow token downloads it. The public plugin source is checked
+out at a pinned commit, and the game process receives no repository token. The
+runner checks the archive digest, exact file list and each extracted file hash.
+Only numerical observations are retained; the temporary release is removed after
+the investigation. No game bundle belongs in the public project or release.
