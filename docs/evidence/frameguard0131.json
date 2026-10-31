@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "type": "frame_guard_fallback_only",
+  "status": "passed",
+  "claim": "An activated 2x target tripped the frame guard, restored native 1x, and remained latched.",
+  "scope": "Existing remote trace replay only; no uniform 2x gameplay or movement certification.",
+  "runtimeSourceSHA": "51e089f2d74b3c971c75b5a6cde15e2e2e5145e7",
+  "verifierSourceSHA": "3ecea007c57588b589d7c5b28abbe6f849a9358b",
+  "sourceGitHubRunId": "41175749484",
+  "workflowRepository": "fubukisama/AzerothSurvivorsSpeedGear",
+  "verifierFileSHA256": "ebeebb158a965f40c6ecc2ce01f47d1bec2e867c8f15c5074c681f93bfdec987",
+  "sourceReportSHA256": "86a3ca7f360976677280eab62da4fd9f3119026dc8a985dd8b494ef8a34586ab",
+  "originalRunStatus": "blocked",
+  "originalMissingEvidence": [
+    "unhooked.continuousSamples",
+    "hooked1x.continuousSamples"
+  ],
+  "originalRunNotes": {
+    "reason": "blocked_incomplete_frame_guard_evidence",
+    "missingEvidence": [
+      "unhooked.continuousSamples",
+      "hooked1x.continuousSamples"
+    ],
+    "scope": "One official Windows build on a disposable software-rendered runner. No general gameplay or future-version certification."
+  },
+  "proof": {
+    "firstGuardFileTime": 134379011750736459,
+    "firstGuardSequence": 68,
+    "nativeSecondsAfterGuard": 1.5197897,
+    "nativeHeartbeatAgeMs": 296,
+    "nativeActivatedSimulationCalls": 2523,
+    "nativeRestoredSimulationCalls": 2578,
+    "postGuardSampleCount": 15,
+    "postGuardExternalSeconds": 8.0026783,
+    "postGuardMaxSampleGapSeconds": 0.6876248,
+    "postGuardRawTimeRate": 1.0109115594462923,
+    "postGuardCooldownDecayRate": 1.0354042191293789,
+    "cooldownDecay": 5.800000000000001,
+    "cooldownDecayExternalSeconds": 5.601677,
+    "cooldownDecayIntervals": 10,
+    "selfDamageEvents": 15.0,
+    "latchedTargetSampleCount": 29,
+    "latchedStageFourSampleCount": 11,
+    "latchedExternalSeconds": 15.4952882
+  }
+}

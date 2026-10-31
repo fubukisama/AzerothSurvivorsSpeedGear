@@ -18,6 +18,15 @@ native 1x receipt and normal post-guard simulation/cooldown rates. It cannot be
 reported as successful 2x movement. Builds, automated regressions and real-game
 tests remain remote-only.
 
+The independent [remote trace verification](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41177528605)
+passed against the actual 0.131.0 combat record from runtime source `51e089f`.
+It rechecked the raw rows, native 200-to-100 transition, fresh 1x receipt,
+1.011x post-guard run time, 1.035x cooldown decay and 15.495 seconds of latched
+fallback. The [committed verdict](evidence/frameguard0131.json) preserves the
+original report's blocked status and pre-guard baseline sampling notes. This
+establishes fallback behavior only, not uniform 2x movement or full gameplay
+acceptance. The verifier's synthetic invalid-evidence tests also passed remotely.
+
 ## Version 0.6.2 speed measurement and licensing
 
 The pre-fix remote run

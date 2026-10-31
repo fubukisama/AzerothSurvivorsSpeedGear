@@ -34,6 +34,14 @@ receipt. The engine's physics clamp remains intact. At extremely low frame rates
 even the original unmodified 1x game can be limited; returning to 1x prevents
 additional acceleration from worsening that disparity.
 
+Actual restoration was independently [verified remotely](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41177528605)
+from the existing combat record: native speed changed from 200 to 100, post-guard
+run time was 1.011x, cooldown decay was 1.035x, and later accelerated-target
+samples stayed at 1x for 15.495 seconds. The original full experiment remained
+blocked by sparse pre-guard baseline sampling; its status was not rewritten.
+The [separate verdict](evidence/frameguard0131.json) makes only the narrower
+automatic-restoration claim.
+
 ## Reproduced display defect
 
 The remote [pre-fix regression](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41096103400)
