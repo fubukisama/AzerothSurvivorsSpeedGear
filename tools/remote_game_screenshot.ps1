@@ -15,6 +15,7 @@ $failureCode = 'capture_failed'
 $bitmap = $null
 $graphics = $null
 $temporaryOutput = $null
+$progressOutput = $null
 
 function Stop-Capture([string]$Code) {
     $script:failureCode = $Code
@@ -27,6 +28,16 @@ function Assert-NoLinkedAncestor([string]$Path) {
         if (($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { Stop-Capture 'linked_output_path' }
         $cursor = $cursor.Parent
     }
+}
+
+function Write-CaptureProgress([string]$Stage) {
+    if ($null -eq $script:progressOutput -or $Stage -cnotin @('started', 'assemblies', 'window', 'copy', 'save', 'done')) { return }
+    # Fixed, small status only. This sidecar remains useful if the parent ends a
+    # blocked native capture call; no window text, path or image data is written.
+    try {
+        $value = [ordered]@{ schema = 1; stage = $Stage } | ConvertTo-Json -Compress
+        [IO.File]::WriteAllText($script:progressOutput, $value, (New-Object Text.UTF8Encoding($false)))
+    } catch {}
 }
 
 try {
@@ -48,6 +59,13 @@ try {
     if (Test-Path -LiteralPath $output) { Stop-Capture 'output_already_exists' }
     if (Test-Path -LiteralPath $captureRoot) { Assert-NoLinkedAncestor $captureRoot }
     else { New-Item -ItemType Directory -Path $captureRoot | Out-Null }
+    $progressOutput = $output + '.progress.json'
+    if (Test-Path -LiteralPath $progressOutput) {
+        $existingProgress = Get-Item -LiteralPath $progressOutput -Force
+        if (($existingProgress.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            $existingProgress.PSIsContainer -or $existingProgress.Length -gt 1024) { Stop-Capture 'invalid_progress_path' }
+    }
+    Write-CaptureProgress 'started'
 
     $game = Get-Process -Id $GameProcessId -ErrorAction Stop
     if ($game.ProcessName -ine 'AzerothSurvivors') { Stop-Capture 'unexpected_process_name' }
@@ -55,6 +73,7 @@ try {
     $window = $game.MainWindowHandle
     if ($game.HasExited -or $window -eq [IntPtr]::Zero) { Stop-Capture 'game_window_unavailable' }
 
+    Write-CaptureProgress 'assemblies'
     Add-Type -AssemblyName System.Drawing
     Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
@@ -82,6 +101,7 @@ public static class AZSGPrivateWindowCapture {
     }
 }
 '@
+    Write-CaptureProgress 'window'
     [uint32]$owner = 0
     [void][AZSGPrivateWindowCapture]::GetWindowThreadProcessId($window, [ref]$owner)
     if ($owner -ne [uint32]$GameProcessId -or [AZSGPrivateWindowCapture]::IsIconic($window)) { Stop-Capture 'game_window_not_visible' }
@@ -109,21 +129,25 @@ public static class AZSGPrivateWindowCapture {
     if ($width -lt 64 -or $height -lt 64) { Stop-Capture 'game_window_offscreen' }
     $bitmap = New-Object Drawing.Bitmap($width, $height)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    $printed = $false
-    if ($left -eq $clientLeft -and $top -eq $clientTop -and $right -eq $clientRight -and $bottom -eq $clientBottom) {
+    [uint32]$foregroundOwner = 0
+    [void][AZSGPrivateWindowCapture]::GetWindowThreadProcessId([AZSGPrivateWindowCapture]::GetForegroundWindow(), [ref]$foregroundOwner)
+    Write-CaptureProgress 'copy'
+    if ($foregroundOwner -eq [uint32]$GameProcessId) {
+        # DX12 windows can block in PrintWindow. The visible owned game client
+        # can be copied directly without sending a synchronous window message.
+        $graphics.CopyFromScreen([int]$left, [int]$top, 0, 0, (New-Object Drawing.Size($width, $height)), [Drawing.CopyPixelOperation]::SourceCopy)
+        $result.mode = 'visible_game_client'
+    } else {
+        # An occluded window may only be captured through its own HWND. Never
+        # copy pixels belonging to an unrelated foreground application.
+        if ($left -ne $clientLeft -or $top -ne $clientTop -or $right -ne $clientRight -or $bottom -ne $clientBottom) { Stop-Capture 'game_not_foreground' }
         $dc = $graphics.GetHdc()
         try { $printed = [AZSGPrivateWindowCapture]::PrintWindow($window, $dc, 3) }
         finally { $graphics.ReleaseHdc($dc) }
-        if ($printed) { $printed = [AZSGPrivateWindowCapture]::HasVisibleContent($bitmap) }
+        if (-not $printed -or -not [AZSGPrivateWindowCapture]::HasVisibleContent($bitmap)) { Stop-Capture 'owned_window_unavailable' }
+        $result.mode = 'owned_window'
     }
-    if ($printed) { $result.mode = 'owned_window' }
-    else {
-        [uint32]$foregroundOwner = 0
-        [void][AZSGPrivateWindowCapture]::GetWindowThreadProcessId([AZSGPrivateWindowCapture]::GetForegroundWindow(), [ref]$foregroundOwner)
-        if ($foregroundOwner -ne [uint32]$GameProcessId) { Stop-Capture 'game_not_foreground' }
-        $graphics.CopyFromScreen([int]$left, [int]$top, 0, 0, (New-Object Drawing.Size($width, $height)), [Drawing.CopyPixelOperation]::SourceCopy)
-        $result.mode = 'visible_game_client'
-    }
+    Write-CaptureProgress 'save'
     $temporaryOutput = $output + '.tmp-' + [guid]::NewGuid().ToString('N')
     $bitmap.Save($temporaryOutput, [Drawing.Imaging.ImageFormat]::Png)
     if ((Get-Item -LiteralPath $temporaryOutput).Length -gt 4MB) { Stop-Capture 'image_size_limit' }
@@ -133,6 +157,7 @@ public static class AZSGPrivateWindowCapture {
     $result.code = 'captured'
     $result.width = $width
     $result.height = $height
+    Write-CaptureProgress 'done'
 } catch {
     $result.code = $failureCode
 } finally {

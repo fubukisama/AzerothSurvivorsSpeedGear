@@ -556,7 +556,7 @@ function Read-Telemetry($Row) {
 }
 
 function Capture-BlockedFrame($Session, [string]$Mode) {
-    $result = [ordered]@{ requested = $false; screenshotCaptured = $false; code = 'not_requested'; width = 0; height = 0 }
+    $result = [ordered]@{ requested = $false; screenshotCaptured = $false; code = 'not_requested'; width = 0; height = 0; progressStage = 'none' }
     if ($env:AZSG_CAPTURE_FRAME -cne '1') { return [pscustomobject]$result }
     $result.requested = $true
     if ($Session.Child.HasExited) { $result.code = 'game_exited'; return [pscustomobject]$result }
@@ -564,15 +564,28 @@ function Capture-BlockedFrame($Session, [string]$Mode) {
     if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) { $result.code = 'helper_missing'; return [pscustomobject]$result }
     $process = $null
     try {
+        $framePath = Join-Path $script:projectRoot ('acceptance\frame-' + $Mode + '.png')
         $info = [Diagnostics.ProcessStartInfo]::new((Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'))
         $info.UseShellExecute = $false; $info.CreateNoWindow = $true; $info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
         $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
         foreach ($argument in @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $helper,
-            '-GameProcessId', [string]$Session.Child.Id, '-OutputPath', (Join-Path $script:projectRoot ('acceptance\frame-' + $Mode + '.png')))) { $info.ArgumentList.Add($argument) }
+            '-GameProcessId', [string]$Session.Child.Id, '-OutputPath', $framePath)) { $info.ArgumentList.Add($argument) }
         $process = [Diagnostics.Process]::Start($info)
         $stdout = $process.StandardOutput.ReadToEndAsync(); $stderr = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit(8000)) {
+        if (-not $process.WaitForExit(20000)) {
             $process.Kill(); [void]$process.WaitForExit(1000)
+            $progressPath = $framePath + '.progress.json'
+            if (Test-Path -LiteralPath $progressPath -PathType Leaf) {
+                try {
+                    $progressFile = Get-Item -LiteralPath $progressPath -Force
+                    if ($progressFile.Length -le 256 -and ($progressFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
+                        $progress = [IO.File]::ReadAllText($progressPath) | ConvertFrom-Json
+                        if ($progress.schema -eq 1 -and $progress.stage -cin @('started', 'assemblies', 'window', 'copy', 'save', 'done')) {
+                            $result.progressStage = [string]$progress.stage
+                        }
+                    }
+                } catch { }
+            }
             $result.code = 'helper_timeout'; return [pscustomobject]$result
         }
         $text = $stdout.GetAwaiter().GetResult()
@@ -633,6 +646,7 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
     $start = [AZSGRemoteGame]::Wall(); $firstPlayingAt = $null; $lastEnter = 0L; $lastChoice = 0L
     $movementKey = 0; $moveStage = -1; $moveStart = 0L; $inputOkay = $true; $reason = 'blocked_no_playing'
     $startupHeld = $false; $startupHoldUntil = 0L; $lastEscapeSeq = -1L; $initialEnterSent = $false
+    $frameAttempted = $false; $earlyCapture = $null
     $telemetryInstance = 0L; $instanceSequences = @{}; $telemetryReloaded = $false; $playingInstance = 0L
     try {
         $session.Start($info)
@@ -706,10 +720,20 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
                             $lastEscapeSeq = $latest.seq
                         }
                     } elseif ($samples.Count -gt 0 -and $latest.phase -ceq 'ready') {
+                        $readyInputAllowed = $true
+                        if ($env:AZSG_CAPTURE_FRAME -ceq '1' -and -not $frameAttempted) {
+                            if ($latest.mapContinent -gt 0 -and $latest.mapZone -gt 0 -and $latest.mapX -ge 0 -and $latest.mapY -ge 0) {
+                                $frameAttempted = $true
+                                $earlyCapture = Capture-BlockedFrame $session $Mode
+                                $earlyCapture | Add-Member -NotePropertyName timing -NotePropertyValue 'ready_before_input'
+                            } else { $readyInputAllowed = $false }
+                        }
                         # Hold across slow rendered frames while this loop keeps
                         # draining telemetry; the playing observation releases W.
-                        $inputOkay = $session.Key(0x57, $true) -and $inputOkay
-                        $startupHeld = $inputOkay; $startupHoldUntil = $now + 40000000L
+                        if ($readyInputAllowed) {
+                            $inputOkay = $session.Key(0x57, $true) -and $inputOkay
+                            $startupHeld = $inputOkay; $startupHoldUntil = [AZSGRemoteGame]::Wall() + 40000000L
+                        }
                     } elseif (-not $initialEnterSent -and ($samples.Count -eq 0 -or $latest.phase -ceq 'unknown')) {
                         $inputOkay = $session.Tap(0x0d) -and $inputOkay
                         $initialEnterSent = $true
@@ -727,7 +751,9 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
             Start-Sleep -Milliseconds 50
         }
         if ($startupHeld -and -not $session.Child.HasExited) { [void]$session.Key(0x57, $false); $startupHeld = $false }
-        $capture = if ($reason -cne 'observed') { Capture-BlockedFrame $session $Mode } else { [pscustomobject]@{ requested = $false; screenshotCaptured = $false; code = 'not_needed'; width = 0; height = 0 } }
+        $capture = if ($frameAttempted) { $earlyCapture }
+            elseif ($reason -cne 'observed') { Capture-BlockedFrame $session $Mode }
+            else { [pscustomobject]@{ requested = $false; screenshotCaptured = $false; code = 'not_needed'; width = 0; height = 0; progressStage = 'none' } }
         return [pscustomobject]@{ mode = $Mode; status = $reason; softwareAdapterObserved = $session.SoftwareObserved
             processExitCode = $(if ($session.Child.HasExited) { $session.Child.ExitCode } else { $null })
             gpuFailure = $session.GpuFailure; panicked = $session.Panicked
