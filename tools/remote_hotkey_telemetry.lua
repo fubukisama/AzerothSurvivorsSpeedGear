@@ -93,6 +93,11 @@ local function layoutFields(gear)
             end
             table.insert(previous, box);
         end
+        local font = method(widget, "GetFontString");
+        if (font) then
+            local textHeight = dimension(font, "GetStringHeight");
+            if (textHeight > dimension(widget, "GetHeight") - 7) then bounds = bounds + 1; end
+        end
     end
     return string.format("|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%d|%d|%d|",
         dimension(panel, "GetWidth"), dimension(panel, "GetHeight"),

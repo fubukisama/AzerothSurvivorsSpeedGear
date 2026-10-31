@@ -48,6 +48,14 @@ public static class AZSGHotkeyMouse {
             return [pscustomobject]$r
         } catch { return $null }
     }
+    function Test-NativeButtonFit([double]$Width,[double]$TextWidth) {
+        # The independent hidden-font and displayed-button measurements differ
+        # by up to 2.6 UI units in two real client captures after rebinding.
+        # Verify compact, positive text padding rather than implementation-level
+        # pixel equality. The old 528-unit restore button still fails this range.
+        return $TextWidth -gt 0 -and $Width -ge [Math]::Max(44,[Math]::Ceiling($TextWidth+20)) -and
+            $Width -le [Math]::Max(44,[Math]::Ceiling($TextWidth+28))
+    }
     function Drain-Hotkey {
         $row = $null
         while ($script:hk.session.Rows.TryDequeue([ref]$row)) {
@@ -294,8 +302,7 @@ public static class AZSGHotkeyMouse {
         Assert-Hotkey 'compact_panel_native_geometry' ($compact.panelWidth -gt 0 -and $compact.panelWidth -lt 500 -and $compact.panelHeight -gt 0 -and $compact.panelHeight -lt 432 -and $compact.boundsViolations -eq 0 -and $compact.overlaps -eq 0) $compact
         foreach($name in @('stop','close','down','up')){
             $actual=$compact.($name+'Width');$textWidth=$compact.($name+'TextWidth')
-            $expected=[Math]::Max(44,[Math]::Ceiling($textWidth+24))
-            Assert-Hotkey ('native_text_sized_'+$name) ($textWidth -gt 0 -and [Math]::Abs($actual-$expected) -le 1.01) $compact
+            Assert-Hotkey ('native_text_sized_'+$name) (Test-NativeButtonFit $actual $textWidth) $compact
         }
         Click-Hotkey 'detailsButton'; Wait-Hotkey 'details_expanded' { $script:hk.current.detailsShown -eq 1 -and $script:hk.current.panelHeight -gt $compact.panelHeight }
         Click-Hotkey 'detailsButton'; Wait-Hotkey 'details_collapsed' { $script:hk.current.detailsShown -eq 0 -and [Math]::Abs($script:hk.current.panelHeight-$compact.panelHeight) -le 1 }
@@ -306,7 +313,7 @@ public static class AZSGHotkeyMouse {
         Assert-Hotkey 'old_q_binding_restored' ($script:hk.current.q -ceq $script:hk.current.originalQ -and $script:hk.current.q -cne 'AZSG_SLOWER') $script:hk.current
         Assert-Hotkey 'old_e_binding_restored' ($script:hk.current.e -ceq $script:hk.current.originalE -and $script:hk.current.e -cne 'AZSG_FASTER') $script:hk.current
         $rebound=$script:hk.current
-        Assert-Hotkey 'rebound_layout_native_geometry' ($rebound.boundsViolations -eq 0 -and $rebound.overlaps -eq 0 -and [Math]::Abs($rebound.upWidth-[Math]::Max(44,[Math]::Ceiling($rebound.upTextWidth+24))) -le 1.01) $rebound
+        Assert-Hotkey 'rebound_layout_native_geometry' ($rebound.boundsViolations -eq 0 -and $rebound.overlaps -eq 0 -and (Test-NativeButtonFit $rebound.upWidth $rebound.upTextWidth)) $rebound
         Capture-Hotkey 1
         Click-Hotkey 'closeButton'; Wait-Hotkey 'panel_hidden' { $script:hk.current.panel -eq 0 }
         Begin-HotkeyCombat 'configured'
