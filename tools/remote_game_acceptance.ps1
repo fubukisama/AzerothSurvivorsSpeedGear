@@ -26,6 +26,7 @@ $report = [ordered]@{ schema = 1; product = 'AzerothSurvivorsSpeedGear'; status 
     runtimeProfile = 'system'; runtimeFiles = @()
     machine = [ordered]@{ logicalProcessors = $null; totalPhysicalMemoryBytes = $null }
     startupSeconds = 90
+    viewport = '640x480'
     renderingRequested = 'DX12 software fallback / Microsoft Basic Render Driver'; runs = @(); criteria = @(); metrics = $null; missingEvidence = @()
     scope = 'One official Windows build on a disposable software-rendered runner. No general gameplay or future-version certification.'
     clock = 'GetSystemTimePreciseAsFileTime in the unhooked parent process'
@@ -654,7 +655,7 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
     Write-Text (Join-Path $telemetry 'AZSGAcceptance.toc') "## Interface: 11200`n## Title: AZSG remote acceptance`nMode.lua`nTelemetry.lua`n"
     Write-Text (Join-Path $telemetry 'Mode.lua') ('AZSGAcceptanceMode = "' + $Mode + '";' + "`n")
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'remote_game_telemetry.lua') -Destination (Join-Path $telemetry 'Telemetry.lua')
-    Write-Text (Join-Path $state 'config.toml') "[cvars]`ngxWindow = `"1`"`ngxResolution = `"640x480`"`ngxVSync = `"0`"`nfarclip = `"177`"`nshadowLevel = `"0`"`n"
+    Write-Text (Join-Path $state 'config.toml') "[cvars]`ngxWindow = `"1`"`ngxResolution = `"$script:viewport`"`ngxVSync = `"0`"`nfarclip = `"177`"`nshadowLevel = `"0`"`n"
     if ($Mode -ceq 'hooked') {
         $addon = Join-Path $state 'AddOns\AZSSpeedGear'
         New-Item -ItemType Directory -Path $addon | Out-Null
@@ -673,7 +674,7 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
     $info.Environment['WGPU_FORCE_FALLBACK_ADAPTER'] = '1'
     $info.Environment['WGPU_ADAPTER_NAME'] = 'Microsoft Basic Render Driver'
     $info.Environment['RUST_LOG'] = 'info,wgpu_core=warn,wgpu_hal=warn,naga=warn'
-    $info.Environment['WOW_WIN'] = '640x480'
+    $info.Environment['WOW_WIN'] = $script:viewport
     $info.Environment['BENILLA_HOME'] = $state
     $appData = Join-Path $GameRoot 'AppData'; New-Item -ItemType Directory -Path $appData | Out-Null
     $info.Environment['APPDATA'] = $appData; $info.Environment['LOCALAPPDATA'] = $appData
@@ -880,6 +881,12 @@ try {
         $script:startupSeconds = $requestedStartup
     }
     $report.startupSeconds = $script:startupSeconds
+    $script:viewport = '640x480'
+    if (-not [string]::IsNullOrWhiteSpace($env:AZSG_GAME_VIEWPORT)) {
+        if ($env:AZSG_GAME_VIEWPORT -cnotin @('640x480', '320x240')) { throw 'blocked_viewport' }
+        $script:viewport = $env:AZSG_GAME_VIEWPORT
+    }
+    $report.viewport = $script:viewport
     try {
         $machine = @(Get-CimInstance -ClassName Win32_ComputerSystem -Property NumberOfLogicalProcessors,TotalPhysicalMemory -OperationTimeoutSec 5 -ErrorAction Stop)
         if ($machine.Count -eq 1) {

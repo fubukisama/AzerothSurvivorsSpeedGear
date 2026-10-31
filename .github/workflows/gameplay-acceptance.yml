@@ -26,6 +26,14 @@ on:
         required: true
         type: string
         default: '90'
+      viewport:
+        description: Disposable game-client viewport
+        required: true
+        type: choice
+        default: '640x480'
+        options:
+          - '640x480'
+          - '320x240'
 
 permissions:
   contents: read
@@ -47,10 +55,12 @@ jobs:
           TRANSFER_URL: ${{ secrets.AZSG_LOCAL_GAME_TRANSFER_URL }}
           RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
           STARTUP_SECONDS: ${{ inputs.startup_seconds }}
+          GAME_VIEWPORT: ${{ inputs.viewport }}
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:RUNTIME_PROFILE -cnotin @('system', 'updated_warp')) { throw 'Invalid runtime profile.' }
           if ($env:STARTUP_SECONDS -cnotmatch '^(?:9[0-9]|[12][0-9]{2}|300)$') { throw 'Scene startup wait must be 90-300 seconds.' }
+          if ($env:GAME_VIEWPORT -cnotin @('640x480', '320x240')) { throw 'Invalid game viewport.' }
           if ($env:BUNDLE_SHA256 -ne '' -or $env:BUNDLE_BYTES -ne '') {
             if ($env:BUNDLE_SHA256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Invalid private bundle digest.' }
             if ($env:BUNDLE_BYTES -cnotmatch '^[1-9][0-9]{0,9}$' -or [long]$env:BUNDLE_BYTES -ge 2GB) { throw 'Invalid private bundle byte count.' }
@@ -143,6 +153,7 @@ jobs:
           AZSG_REMOTE_RUNTIME_DLL_DIR: ${{ env.AZSG_REMOTE_RUNTIME_DLL_DIR }}
           AZSG_REMOTE_RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
           AZSG_STARTUP_SECONDS: ${{ inputs.startup_seconds }}
+          AZSG_GAME_VIEWPORT: ${{ inputs.viewport }}
           WGPU_DX12_COMPILER: ${{ inputs.runtime_profile == 'updated_warp' && 'dxc' || '' }}
         run: ./tools/remote_game_acceptance.ps1 -PackagePath $env:AZSG_ACCEPTANCE_PACKAGE -OutputPath acceptance/report.json
       - name: Retain only our bounded numerical report
