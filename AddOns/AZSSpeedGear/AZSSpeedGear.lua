@@ -225,8 +225,10 @@ function Gear.NewController(api)
         if (bucket and bucket.wall == now) then
             bucket.minimum = math.min(bucket.minimum, run);
             bucket.maximum = math.max(bucket.maximum, run);
+            if (positiveFresh) then bucket.positiveSamples = (bucket.positiveSamples or 0) + 1; end
         else
-            table.insert(buckets, { wall = now, minimum = run, maximum = run });
+            table.insert(buckets, { wall = now, minimum = run, maximum = run,
+                positiveSamples = positiveFresh and 1 or 0 });
         end
         while (table.getn(buckets) > 0 and buckets[1].wall < now - 16) do table.remove(buckets, 1); end
         count = table.getn(buckets);
@@ -293,20 +295,32 @@ function Gear.NewController(api)
         end
         local target = self.speed100 / 100;
         local epsilon = 1e-8 * math.max(1, target);
-        -- A contained conservative interval is stronger evidence than a point
-        -- trend: sparse arrivals can bias bucket centers even when every
-        -- feasible rate still matches the target. Never let that point veto
-        -- current interval proof. Only use a recent trend to deny retained
-        -- confidence while the interval is too wide to confirm afresh.
+        -- Sparse arrivals can bias bucket centers even when every feasible
+        -- rate still matches the target. The complete conservative interval
+        -- remains the only entry proof; a recent point may only deny it when
+        -- all four completed buckets have independently bounded coverage.
         local intervalContained = self.measured and upper and lower >= target * 0.90 - epsilon
             and upper <= target * 1.10 + epsilon;
         -- Older matching observations can still fit a gradual rate change.
-        -- Use up to four completed centers (at least three), without clamping
-        -- their independent slope to the longer interval. This trend can only
-        -- revoke the wide-interval grace period; it never grants confirmation.
+        -- At least four distinct positive arrivals and span >= 0.75*upper in
+        -- EACH of the last four completed buckets bound the constant-rate
+        -- center phase error to 0.125s. Four integer-spaced centers have OLS
+        -- weight L1 <= 0.8, bounding slope bias to 10% of that rate. This
+        -- protects exact-target stability, not every rate near the tolerance
+        -- boundary. Never fill a sparse recent window with older buckets.
+        -- The qualified trend is deny-only and never grants confirmation.
         local recentEstimate = nil;
         local recentFirst = math.max(2, count - 4);
-        if (count - recentFirst >= 3) then
+        local recentQualified = count - recentFirst == 4 and finiteNumber(upper) and upper > 0;
+        index = recentFirst;
+        while (recentQualified and index < count) do
+            local point = buckets[index];
+            if ((point.positiveSamples or 0) < 4 or point.maximum - point.minimum + epsilon < upper * 0.75) then
+                recentQualified = false;
+            end
+            index = index + 1;
+        end
+        if (recentQualified) then
             local base = buckets[recentFirst];
             local baseRaw = (base.minimum + base.maximum) / 2;
             local samples, sumX, sumY, sumXX, sumXY = 0, 0, 0, 0, 0;
@@ -326,7 +340,7 @@ function Gear.NewController(api)
             and (recentEstimate < target * 0.90 - epsilon or recentEstimate > target * 1.10 + epsilon);
         local outside = lower > target * 1.10 + epsilon or (upper and upper < target * 0.90 - epsilon);
         self.measurementMismatch = outside and true or false;
-        local contained = intervalContained;
+        local contained = intervalContained and not recentOutside;
         if (contained) then
             -- A live sliding window refreshes confidence without discarding the
             -- very observations that established it. There is no 12s restart.
