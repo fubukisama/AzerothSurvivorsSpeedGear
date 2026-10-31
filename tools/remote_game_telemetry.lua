@@ -5,6 +5,7 @@ local cvar = "AZSGAcceptanceTelemetry";
 local sequence, runPackets, spellPackets, stops, hits, resets = 0, 0, 0, 0, 0, 0;
 local firstPlaying, previousCd, previousSpell, previousStamp, lastTarget;
 local pulse = 0;
+local updates = 0;
 local initialized = false;
 local function number(value)
     if (type(value) ~= "number" or value ~= value or value < -1e10 or value > 1e10) then return -1; end
@@ -48,6 +49,7 @@ frame:SetScript("OnEvent", function()
     else hits = hits + 1; end
 end);
 frame:SetScript("OnUpdate", function()
+    updates = updates + 1;
     initialize();
     if (not initialized) then return; end
     pulse = pulse + (arg1 or 0);
@@ -102,7 +104,7 @@ frame:SetScript("OnUpdate", function()
         .. "|" .. resets .. "|" .. stops .. "|" .. hits .. "|" .. fmt(run.hp)
         .. "|" .. runPackets .. "|" .. spellPackets .. "|" .. accepted
         .. "|" .. shown(ChatFrameEditBox) .. "|" .. shown(GameMenuFrame)
-        .. "|" .. string.format("%.0f", instance);
+        .. "|" .. string.format("%.0f", instance) .. "|" .. string.format("%.0f", updates);
     SetCVar(cvar, payload);
     ConsoleExec(cvar);
 end);

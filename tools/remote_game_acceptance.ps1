@@ -478,6 +478,8 @@ public sealed class AZSGRemoteGame : IDisposable {
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window,out uint pid);
   [DllImport("user32.dll",SetLastError=true)] static extern uint SendInput(uint count,Input[] inputs,int size);
   [DllImport("user32.dll")] static extern uint MapVirtualKeyW(uint code,uint kind);
+  [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window,out Rect rectangle);
+  [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left,Top,Right,Bottom; }
   [StructLayout(LayoutKind.Sequential)] struct Keyboard { public ushort Vk, Scan; public uint Flags, Time; public UIntPtr Extra; }
   [StructLayout(LayoutKind.Sequential)] struct Mouse { public int X,Y; public uint Data,Flags,Time; public UIntPtr Extra; }
   [StructLayout(LayoutKind.Explicit)] struct Union { [FieldOffset(0)] public Keyboard Key; [FieldOffset(0)] public Mouse Mouse; }
@@ -556,6 +558,14 @@ public sealed class AZSGRemoteGame : IDisposable {
     input.Value.Key=new Keyboard {Vk=scan==0?key:(ushort)0,Scan=(ushort)scan,Flags=(scan==0?0u:8u)|(down?0u:2u)};
     return SendInput(1,new[]{input},Marshal.SizeOf(typeof(Input)))==1;
   }
+  public int[] ClientSize() {
+    if(Child==null || Child.HasExited) return null;
+    Child.Refresh(); var handle=Child.MainWindowHandle; if(handle==IntPtr.Zero) return null;
+    uint pid; GetWindowThreadProcessId(handle,out pid); if(pid!=(uint)Child.Id) return null;
+    Rect rectangle; if(!GetClientRect(handle,out rectangle)) return null;
+    var width=rectangle.Right-rectangle.Left; var height=rectangle.Bottom-rectangle.Top;
+    return width>0 && width<=16384 && height>0 && height<=16384?new[]{width,height}:null;
+  }
   public bool Tap(ushort key) { var down=Key(key,true); System.Threading.Thread.Sleep(80); return Key(key,false)&&down; }
   public void Dispose() {
     if(Child==null) return;
@@ -566,12 +576,14 @@ public sealed class AZSGRemoteGame : IDisposable {
 '@
 
 function Read-Telemetry($Row) {
-    $match = [regex]::Match($Row.Payload, '^(?<protocol>AZSGT1\|[0-9]+\|[01]\|(?:100|200)\|[0-5]\|(?:unknown|ready|playing|choosing|paused|dead|victory)\|(?:-?[0-9]+(?:\.[0-9]+)?\|){16}[01]\|(?:-1|[01])\|(?:-1|[01])\|[0-9]{1,16})(?:[^0-9.|]|$)')
+    $match = [regex]::Match($Row.Payload, '^(?<protocol>AZSGT1\|[0-9]+\|[01]\|(?:100|200)\|[0-5]\|(?:unknown|ready|playing|choosing|paused|dead|victory)\|(?:-?[0-9]+(?:\.[0-9]+)?\|){16}[01]\|(?:-1|[01])\|(?:-1|[01])\|[0-9]{1,16}\|[0-9]{1,16})(?:[^0-9.|]|$)')
     if (-not $match.Success) { return $null }
     $parts = $match.Groups['protocol'].Value.Split('|')
-    if ($parts.Count -ne 26) { return $null }
+    if ($parts.Count -ne 27) { return $null }
     [long]$instance = 0
     if (-not [long]::TryParse($parts[25], [ref]$instance) -or $instance -lt 1 -or $instance -gt 9007199254740991L) { return $null }
+    [long]$frames = 0
+    if (-not [long]::TryParse($parts[26], [ref]$frames) -or $frames -lt 1 -or $frames -gt 9007199254740991L) { return $null }
     $numeric = @()
     for ($index = 6; $index -le 21; $index++) {
         [double]$value = 0
@@ -585,7 +597,60 @@ function Read-Telemetry($Row) {
         spellId = $numeric[7]; cd = $numeric[8]; cdmax = $numeric[9]; cooldownResets = $numeric[10]
         spellcastStopEvents = $numeric[11]; selfDamageEvents = $numeric[12]; hp = $numeric[13]
         runPackets = $numeric[14]; spellPackets = $numeric[15]; requestAccepted = [int]$parts[22]
-        chatOpen = [int]$parts[23]; gameMenuShown = [int]$parts[24]; instance = $instance }
+        chatOpen = [int]$parts[23]; gameMenuShown = [int]$parts[24]; instance = $instance; frames = $frames }
+}
+
+function Read-NativeBackendEvidence([string]$GameRoot) {
+    $result = [ordered]@{ statusAvailable = $false; backend = $null; transport = $null; speed100 = $null
+        heartbeatAgeMs = $null; fileReads = $null; consoleForwardDroppedBytes = $null; safeLog = @() }
+    $root = [IO.Path]::GetFullPath($GameRoot)
+    if (-not $root.StartsWith($script:fixtureRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { return [pscustomobject]$result }
+    $statusPath = Join-Path $root 'AZSSpeedGear-status.json'
+    try {
+        $file = Get-Item -LiteralPath $statusPath -Force
+        if (-not $file.PSIsContainer -and $file.Length -le 16384 -and ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
+            $status = [IO.File]::ReadAllText($statusPath, $script:utf8) | ConvertFrom-Json
+            if ($status.product -ceq 'AzerothSurvivorsSpeedGear' -and $status.schema -eq 1 -and
+                $status.backend -cin @('initializing', 'ready', 'unsupported', 'hooks_failed') -and
+                $status.transport -cin @('waiting', 'console', 'file', 'degraded', 'stale', 'disabled')) {
+                foreach ($name in @('speed100', 'fileReads', 'consoleForwardDroppedBytes')) {
+                    if (($status.$name -isnot [long] -and $status.$name -isnot [int]) -or $status.$name -lt 0) { throw 'Invalid diagnostic number.' }
+                }
+                if ($status.speed100 -lt 25 -or $status.speed100 -gt 1000 -or
+                    ($null -ne $status.heartbeatAgeMs -and (($status.heartbeatAgeMs -isnot [long] -and $status.heartbeatAgeMs -isnot [int]) -or $status.heartbeatAgeMs -lt 0))) { throw 'Invalid diagnostic rate or heartbeat.' }
+                foreach ($name in @('backend', 'transport', 'speed100', 'heartbeatAgeMs', 'fileReads', 'consoleForwardDroppedBytes')) { $result[$name] = $status.$name }
+                $result.statusAvailable = $true
+            }
+        }
+    } catch { }
+    $stream = $null
+    try {
+        $logPath = Join-Path $root 'AZSSpeedGear.log'
+        $file = Get-Item -LiteralPath $logPath -Force
+        if ($file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Invalid diagnostic log.' }
+        $stream = [IO.FileStream]::new($logPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        $take = [int][Math]::Min(65536L, $stream.Length); $buffer = [byte[]]::new($take); [void]$stream.Seek(-$take, [IO.SeekOrigin]::End)
+        $read = 0
+        while ($read -lt $take) { $count = $stream.Read($buffer, $read, $take - $read); if ($count -eq 0) { break }; $read += $count }
+        $lines = $script:utf8.GetString($buffer, 0, $read).Split("`n")
+        $safe = [Collections.Generic.List[string]]::new()
+        foreach ($line in $lines) {
+            $match = [regex]::Match($line.TrimEnd("`r"), '^[0-9]{1,2}:[0-9]{1,2}:[0-9]{1,2} (?<text>.*)$')
+            if (-not $match.Success) { continue }
+            $message = $match.Groups['text'].Value; $normalized = $null
+            if ($message -ceq 'ready: waiting for fresh in-game AddOn heartbeat') { $normalized = 'ready: waiting' }
+            elseif ($message -cmatch '^scan=verified sleep_rva=([0-9]{1,10}) return_rva=([0-9]{1,10}) evidence=.*$') { $normalized = 'scan=verified sleep_rva=' + $Matches[1] + ' return_rva=' + $Matches[2] }
+            elseif ($message -cmatch '^transport=(waiting|console|file|degraded|stale|disabled)$') { $normalized = 'transport=' + $Matches[1] }
+            elseif ($message -cmatch '^speed100=([0-9]{1,4}) reason=[A-Za-z0-9_-]{1,64} simulation_calls=([0-9]{1,20})$') {
+                [ulong]$calls = 0
+                if ([int]$Matches[1] -ge 25 -and [int]$Matches[1] -le 1000 -and [ulong]::TryParse($Matches[2], [ref]$calls)) { $normalized = 'speed100=' + $Matches[1] + ' simulation_calls=' + $calls }
+            }
+            if ($null -ne $normalized) { $safe.Add($normalized); if ($safe.Count -gt 8) { $safe.RemoveAt(0) } }
+        }
+        $result.safeLog = @($safe.ToArray())
+    } catch { }
+    finally { if ($null -ne $stream) { $stream.Dispose() } }
+    return [pscustomobject]$result
 }
 
 function Capture-BlockedFrame($Session, [string]$Mode) {
@@ -682,7 +747,7 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
     $samples = [Collections.Generic.List[object]]::new()
     $start = [AZSGRemoteGame]::Wall(); $firstPlayingAt = $null; $lastEnter = 0L; $lastChoice = 0L
     $movementKey = 0; $moveStage = -1; $moveStart = 0L; $inputOkay = $true; $reason = 'blocked_no_playing'
-    $startupHeld = $false; $startupHoldUntil = 0L; $lastEscapeSeq = -1L; $initialEnterSent = $false
+    $startupHeld = $false; $startupHoldUntil = 0L; $lastEscapeSeq = -1L; $startupEnterAttempts = 0
     $frameAttempted = $false; $earlyCapture = $null
     $telemetryInstance = 0L; $instanceSequences = @{}; $telemetryReloaded = $false; $playingInstance = 0L
     try {
@@ -771,9 +836,12 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
                             $inputOkay = $session.Key(0x57, $true) -and $inputOkay
                             $startupHeld = $inputOkay; $startupHoldUntil = [AZSGRemoteGame]::Wall() + 40000000L
                         }
-                    } elseif (-not $initialEnterSent -and ($samples.Count -eq 0 -or $latest.phase -ceq 'unknown')) {
+                    } elseif ($samples.Count -eq 0 -and -not $session.LoadingCoverWaiting) {
+                        # Character selection may not yet have accepted an early
+                        # Enter. Retry only without any world telemetry and while
+                        # no known loading cover currently blocks input.
+                        $startupEnterAttempts++
                         $inputOkay = $session.Tap(0x0d) -and $inputOkay
-                        $initialEnterSent = $true
                     }
                 }
             }
@@ -791,13 +859,15 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
         $capture = if ($frameAttempted) { $earlyCapture }
             elseif ($reason -cne 'observed') { Capture-BlockedFrame $session $Mode }
             else { [pscustomobject]@{ requested = $false; screenshotCaptured = $false; code = 'not_needed'; width = 0; height = 0; progressStage = 'none' } }
-        $peakWorkingSet = $null; $responding = $null
+        $peakWorkingSet = $null; $responding = $null; $clientWidth = $null; $clientHeight = $null
         try {
             $session.Child.Refresh()
             $peak = [long]$session.Child.PeakWorkingSet64
             if ($peak -ge 0) { $peakWorkingSet = $peak }
         } catch { }
         try { if (-not $session.Child.HasExited) { $responding = [bool]$session.Child.Responding } } catch { }
+        try { $size = $session.ClientSize(); if ($null -ne $size -and $size.Length -eq 2) { $clientWidth = $size[0]; $clientHeight = $size[1] } } catch { }
+        $nativeEvidence = if ($Mode -ceq 'hooked') { Read-NativeBackendEvidence $GameRoot } else { $null }
         return [pscustomobject]@{ mode = $Mode; status = $reason; softwareAdapterObserved = $session.SoftwareObserved
             processExitCode = $(if ($session.Child.HasExited) { $session.Child.ExitCode } else { $null })
             gpuFailure = $session.GpuFailure; panicked = $session.Panicked
@@ -805,6 +875,7 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
             frameCapture = $capture
             telemetryInstanceCount = $instanceSequences.Count; telemetryReloaded = $telemetryReloaded
             peakWorkingSetBytes = $peakWorkingSet; responding = $responding
+            actualClientWidth = $clientWidth; actualClientHeight = $clientHeight; startupEnterAttempts = $startupEnterAttempts; nativeBackend = $nativeEvidence
             startupSeconds = $script:startupSeconds; loadingCoverObserved = $session.LoadingCoverObserved; loadingCoverWaiting = $session.LoadingCoverWaiting
             loadingClearObserved = $session.LoadingClearObserved; loadingSnapshots = @($session.LoadingSnapshots)
             pipelineWarmTimedOut = $session.PipelineWarmTimedOut; pipelineWarmPending = $session.PipelineWarmPending
@@ -863,6 +934,7 @@ function Get-StageMetrics($Run, [int]$Stage) {
     }
     return [pscustomobject]@{ count = $rows.Count; externalSeconds = $span; maxSampleGapSeconds = $maxGap
         rawRunRate = ($rows[-1].rawT-$rows[0].rawT)/$span; clientTimeRate = ($rows[-1].getTime-$rows[0].getTime)/$span
+        clientUpdateHz = $(if ($rows[-1].frames -ge $rows[0].frames) { ($rows[-1].frames-$rows[0].frames)/$span } else { $null })
         mapUvRate = $(if ($validMap) { $distance/$span } else { $null })
         cooldownDecayRate = $(if ($validSpell -and $decaySpan -ge 1) { $decay/$decaySpan } else { $null })
         cooldownResets = $rows[-1].cooldownResets-$rows[0].cooldownResets
