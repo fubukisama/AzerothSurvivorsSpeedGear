@@ -4,6 +4,8 @@ local cvar = "AZSGLauncherTelemetry";
 local seq, frames, actions = 0, 0, 0;
 local direction, before, after, accepted = 0, 100, 100, 0;
 local initialized, wrapped = false, false;
+local storeReadyAttempted, storePlayingAttempts = false, 0;
+local storeOptionAttempts, storeOptionPcallOk = 0, -1;
 local instance = math.floor(time() * 1000 + math.random(1, 999));
 local emit;
 local function safe(fn)
@@ -40,6 +42,20 @@ end
 local function install()
     if (not initialized and type(RegisterCVar) == "function") then
         RegisterCVar(cvar, ""); initialized = true;
+    end
+    -- This ordinary game option is confined to the disposable test state.
+    -- READY means the run/player exists, unlike early addon loading. A few
+    -- playing-frame retries tolerate the game's asynchronous option handling.
+    -- pcall success is an API-call observation, not a server acknowledgement.
+    local phase = safe(AZS_GetPhase);
+    if (type(AZS_SetStoringLevels) == "function" and
+        ((phase == "ready" and not storeReadyAttempted) or
+        (phase == "playing" and storePlayingAttempts < 3))) then
+        if (phase == "ready") then storeReadyAttempted = true;
+        else storePlayingAttempts = storePlayingAttempts + 1; end
+        storeOptionAttempts = storeOptionAttempts + 1;
+        local okay = pcall(AZS_SetStoringLevels, true);
+        storeOptionPcallOk = okay and 1 or 0;
     end
     if (not wrapped and AZSSpeedGear and type(AZSSpeedGear.StepHotkey) == "function") then
         local original = AZSSpeedGear.StepHotkey;
@@ -88,7 +104,8 @@ emit = function()
         .. "|" .. shown(GameMenuFrame) .. "|" .. (i18n.code or "unknown") .. "|" .. kind
         .. "|" .. string.format("%.0f", number(safe(time)))
         .. "|" .. string.format("%.6f", number(controller.measurementLower))
-        .. "|" .. string.format("%.6f", number(controller.measurementUpper));
+        .. "|" .. string.format("%.6f", number(controller.measurementUpper))
+        .. "|" .. storeOptionAttempts .. "|" .. storeOptionPcallOk;
     SetCVar(cvar, payload); ConsoleExec(cvar);
 end;
 frame:RegisterEvent("PLAYER_ENTERING_WORLD");

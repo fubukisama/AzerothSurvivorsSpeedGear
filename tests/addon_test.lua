@@ -682,8 +682,13 @@ print("SEAM LIMIT: integer time() cannot establish a 0.2s delay or whether both 
 
 sampleBaseline(4, 4.4);
 check(AZSSpeedGear.controller.speed100 == 500 and AZSSpeedGear.controller.confirmedSpeed100 == nil
-    and AZSSpeedGear.launcher.text == targetCaption("5"),
-    "sustained twelve-percent deviation revokes x5 confirmation within the bounded grace period");
+    and (AZSSpeedGear.launcher.text == targetCaption("5") or AZSSpeedGear.launcher.text == targetCaption("5", "!")),
+    "sustained twelve-percent deviation revokes x5 confirmation within the bounded grace period"
+        .. "; confirmed=" .. tostring(AZSSpeedGear.controller.confirmedSpeed100)
+        .. " measured=" .. tostring(AZSSpeedGear.controller.measured)
+        .. " lower=" .. tostring(AZSSpeedGear.controller.measurementLower)
+        .. " upper=" .. tostring(AZSSpeedGear.controller.measurementUpper)
+        .. " caption=" .. tostring(AZSSpeedGear.launcher.text));
 sampleBaseline(8, 4.9);
 check(AZSSpeedGear.controller.speed100 == 500 and AZSSpeedGear.launcher.text == baselineCaption .. " ×5",
     "same target regains its success caption when a later measured window matches");

@@ -20,7 +20,7 @@ function Invoke-LauncherAcceptance([string]$GameRoot, [string]$Assets, [string]$
     function Read-LauncherRow($Row) {
         $match=[regex]::Match($Row.Payload,'^(AZSGL1\|[A-Za-z0-9_.|_-]{1,1800})(?:[^A-Za-z0-9_.|_-]|$)')
         if(-not $match.Success){return $null}
-        $p=$match.Groups[1].Value.Split('|'); if($p.Count -ne 28){return $null}
+        $p=$match.Groups[1].Value.Split('|'); if($p.Count -ne 30){return $null}
         try {
             return [pscustomobject]@{fileTime=[long]$Row.FileTime;seq=[long]$p[1];instance=[long]$p[2];phase=$p[3];
                 speed100=[int]$p[4];desiredSpeed100=[int]$p[5];active=[int]$p[6];guard=[int]$p[7];confirmedSpeed100=[int]$p[8];
@@ -29,7 +29,8 @@ function Invoke-LauncherAcceptance([string]$GameRoot, [string]$Assets, [string]$
                 actions=[int]$p[14];direction=[int]$p[15];before=[int]$p[16];after=[int]$p[17];accepted=[int]$p[18];frames=[int]$p[19];
                 rawT=[double]::Parse($p[20],[Globalization.CultureInfo]::InvariantCulture);chat=[int]$p[21];menu=[int]$p[22];locale=$p[23];kind=$p[24];
                 wallUnix=[long]$p[25];measurementLower=[double]::Parse($p[26],[Globalization.CultureInfo]::InvariantCulture);
-                measurementUpper=[double]::Parse($p[27],[Globalization.CultureInfo]::InvariantCulture)}
+                measurementUpper=[double]::Parse($p[27],[Globalization.CultureInfo]::InvariantCulture);
+                storeOptionAttempts=[int]$p[28];storeOptionPcallOk=[int]$p[29]}
         } catch { return $null }
     }
     function Drain-Launcher {

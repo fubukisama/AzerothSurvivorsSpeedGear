@@ -194,9 +194,9 @@ function Gear.NewController(api)
             or not finiteNumber(sample.updated) or sample.updated < 0) then self:ResetMeasurement(); return; end
         local run, updated = sample.t, sample.updated;
         if (not sampledClock) then clock = safeCall(self.api.clientClock); end
-        -- GetTime can validate a publication stamp, but supplies no elapsed-time
-        -- scale. Neither it nor the requested multiplier is a real-time oracle.
-        if (finiteNumber(clock) and clock < updated) then self:ResetMeasurement(); return; end
+        -- Require a healthy API clock and publication stamp, but use neither
+        -- GetTime nor the requested multiplier as an elapsed-time scale.
+        if (not finiteNumber(clock) or clock < updated) then self:ResetMeasurement(); return; end
         if (self.rawRunValue == nil) then seedMeasurementSample(now, run, updated); return; end
         if ((self.measureFrameWall and (now < self.measureFrameWall or now - self.measureFrameWall >= 2))
             or run < self.rawRunValue or updated < self.rawRunUpdated
@@ -287,16 +287,41 @@ function Gear.NewController(api)
         end
         local target = self.speed100 / 100;
         local epsilon = 1e-8 * math.max(1, target);
+        -- Older matching observations can still fit a gradual rate change.
+        -- A recent raw trend may conservatively revoke that confidence, never
+        -- grant it. Use up to four completed centers (at least three), without
+        -- clamping their independent slope to the longer interval. Noisy
+        -- arrivals can therefore cause a pending result, not false success.
+        local recentEstimate = nil;
+        local recentFirst = math.max(2, count - 4);
+        if (count - recentFirst >= 3) then
+            local base = buckets[recentFirst];
+            local baseRaw = (base.minimum + base.maximum) / 2;
+            local samples, sumX, sumY, sumXX, sumXY = 0, 0, 0, 0, 0;
+            index = recentFirst;
+            while (index < count) do
+                local point = buckets[index];
+                local x = point.wall - base.wall;
+                local y = (point.minimum + point.maximum) / 2 - baseRaw;
+                samples = samples + 1; sumX = sumX + x; sumY = sumY + y;
+                sumXX = sumXX + x * x; sumXY = sumXY + x * y;
+                index = index + 1;
+            end
+            local denominator = samples * sumXX - sumX * sumX;
+            if (denominator > 0) then recentEstimate = (samples * sumXY - sumX * sumY) / denominator; end
+        end
+        local recentOutside = finiteNumber(recentEstimate)
+            and (recentEstimate < target * 0.90 - epsilon or recentEstimate > target * 1.10 + epsilon);
         local outside = lower > target * 1.10 + epsilon or (upper and upper < target * 0.90 - epsilon);
         self.measurementMismatch = outside and true or false;
-        local contained = self.measured and upper and lower >= target * 0.90 - epsilon
+        local contained = not recentOutside and self.measured and upper and lower >= target * 0.90 - epsilon
             and upper <= target * 1.10 + epsilon;
         if (contained) then
             -- A live sliding window refreshes confidence without discarding the
             -- very observations that established it. There is no 12s restart.
             self.confirmedSpeed100 = self.speed100; self.confirmedAt = now;
         elseif (self.confirmedSpeed100 == self.speed100) then
-            if (outside or inconsistent or not self.measured or not self.confirmedAt or now - self.confirmedAt >= 4) then
+            if (outside or recentOutside or inconsistent or not self.measured or not self.confirmedAt or now - self.confirmedAt >= 4) then
                 self.confirmedSpeed100 = nil; self.confirmedAt = nil;
             end
         end
