@@ -55,5 +55,8 @@ mods are excluded. A temporary private repository can hold the bundle while its
 own short-lived workflow token downloads it. The public plugin source is checked
 out at a pinned commit, and the game process receives no repository token. The
 runner checks the archive digest, exact file list and each extracted file hash.
-Only numerical observations are retained; the temporary release is removed after
-the investigation. No game bundle belongs in the public project or release.
+Default reports retain numerical observations. An owner-authorized private
+diagnostic run may also opt into four redacted panic lines and one bounded game
+window image to identify startup or input failures. These diagnostics exclude
+personal settings and saves. The temporary runtime release is removed after the
+investigation. No game bundle belongs in the public project or release.

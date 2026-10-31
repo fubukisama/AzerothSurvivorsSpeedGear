@@ -17,6 +17,14 @@ local function safe(fn)
     if (ok) then return value; end
     return nil;
 end
+local function shown(widget)
+    if (not widget or type(widget.IsShown) ~= "function") then return -1; end
+    local ok, value = pcall(widget.IsShown, widget);
+    if (not ok) then return -1; end
+    if (value == true or value == 1) then return 1; end
+    return 0;
+end
+local instance = math.floor((safe(time) or 0) * 1000 + math.random(1, 999));
 local function initialize()
     if (initialized) then return; end
     if (type(RegisterCVar) ~= "function" or type(ConsoleExec) ~= "function") then return; end
@@ -92,7 +100,9 @@ frame:SetScript("OnUpdate", function()
         .. "|" .. fmt(x) .. "|" .. fmt(y) .. "|" .. fmt(safe(GetCurrentMapContinent))
         .. "|" .. fmt(safe(GetCurrentMapZone)) .. "|" .. fmt(spell) .. "|" .. fmt(cd) .. "|" .. fmt(cdmax)
         .. "|" .. resets .. "|" .. stops .. "|" .. hits .. "|" .. fmt(run.hp)
-        .. "|" .. runPackets .. "|" .. spellPackets .. "|" .. accepted;
+        .. "|" .. runPackets .. "|" .. spellPackets .. "|" .. accepted
+        .. "|" .. shown(ChatFrameEditBox) .. "|" .. shown(GameMenuFrame)
+        .. "|" .. string.format("%.0f", instance);
     SetCVar(cvar, payload);
     ConsoleExec(cvar);
 end);

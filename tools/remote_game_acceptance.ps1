@@ -454,6 +454,7 @@ public sealed class AZSGRemoteGame : IDisposable {
   [DllImport("kernel32.dll")] public static extern void GetSystemTimePreciseAsFileTime(out long time);
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window,int command);
+  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr window);
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window,out uint pid);
   [DllImport("user32.dll",SetLastError=true)] static extern uint SendInput(uint count,Input[] inputs,int size);
@@ -511,7 +512,10 @@ public sealed class AZSGRemoteGame : IDisposable {
   }
   public bool Focus() {
     Child.Refresh(); var handle=Child.MainWindowHandle; if(handle==IntPtr.Zero) return false;
-    ShowWindow(handle,9); SetForegroundWindow(handle); uint pid; GetWindowThreadProcessId(GetForegroundWindow(),out pid); return pid==(uint)Child.Id;
+    if(IsIconic(handle)) ShowWindow(handle,9);
+    uint pid; GetWindowThreadProcessId(GetForegroundWindow(),out pid);
+    if(pid==(uint)Child.Id) return true;
+    SetForegroundWindow(handle); GetWindowThreadProcessId(GetForegroundWindow(),out pid); return pid==(uint)Child.Id;
   }
   public bool Key(ushort key,bool down) {
     if(!Focus()) return false;
@@ -529,10 +533,12 @@ public sealed class AZSGRemoteGame : IDisposable {
 '@
 
 function Read-Telemetry($Row) {
-    $match = [regex]::Match($Row.Payload, '^(?<protocol>AZSGT1\|[0-9]+\|[01]\|(?:100|200)\|[0-5]\|(?:unknown|ready|playing|choosing|paused|dead|victory)\|(?:-?[0-9]+(?:\.[0-9]+)?\|){16}[01])(?:[^0-9.]|$)')
+    $match = [regex]::Match($Row.Payload, '^(?<protocol>AZSGT1\|[0-9]+\|[01]\|(?:100|200)\|[0-5]\|(?:unknown|ready|playing|choosing|paused|dead|victory)\|(?:-?[0-9]+(?:\.[0-9]+)?\|){16}[01]\|(?:-1|[01])\|(?:-1|[01])\|[0-9]{1,16})(?:[^0-9.|]|$)')
     if (-not $match.Success) { return $null }
     $parts = $match.Groups['protocol'].Value.Split('|')
-    if ($parts.Count -ne 23) { return $null }
+    if ($parts.Count -ne 26) { return $null }
+    [long]$instance = 0
+    if (-not [long]::TryParse($parts[25], [ref]$instance) -or $instance -lt 1 -or $instance -gt 9007199254740991L) { return $null }
     $numeric = @()
     for ($index = 6; $index -le 21; $index++) {
         [double]$value = 0
@@ -545,7 +551,44 @@ function Read-Telemetry($Row) {
         gameWallUnix = $numeric[2]; mapX = $numeric[3]; mapY = $numeric[4]; mapContinent = $numeric[5]; mapZone = $numeric[6]
         spellId = $numeric[7]; cd = $numeric[8]; cdmax = $numeric[9]; cooldownResets = $numeric[10]
         spellcastStopEvents = $numeric[11]; selfDamageEvents = $numeric[12]; hp = $numeric[13]
-        runPackets = $numeric[14]; spellPackets = $numeric[15]; requestAccepted = [int]$parts[22] }
+        runPackets = $numeric[14]; spellPackets = $numeric[15]; requestAccepted = [int]$parts[22]
+        chatOpen = [int]$parts[23]; gameMenuShown = [int]$parts[24]; instance = $instance }
+}
+
+function Capture-BlockedFrame($Session, [string]$Mode) {
+    $result = [ordered]@{ requested = $false; screenshotCaptured = $false; code = 'not_requested'; width = 0; height = 0 }
+    if ($env:AZSG_CAPTURE_FRAME -cne '1') { return [pscustomobject]$result }
+    $result.requested = $true
+    if ($Session.Child.HasExited) { $result.code = 'game_exited'; return [pscustomobject]$result }
+    $helper = Join-Path $PSScriptRoot 'remote_game_screenshot.ps1'
+    if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) { $result.code = 'helper_missing'; return [pscustomobject]$result }
+    $process = $null
+    try {
+        $info = [Diagnostics.ProcessStartInfo]::new((Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'))
+        $info.UseShellExecute = $false; $info.CreateNoWindow = $true; $info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+        $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
+        foreach ($argument in @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $helper,
+            '-GameProcessId', [string]$Session.Child.Id, '-OutputPath', (Join-Path $script:projectRoot ('acceptance\frame-' + $Mode + '.png')))) { $info.ArgumentList.Add($argument) }
+        $process = [Diagnostics.Process]::Start($info)
+        $stdout = $process.StandardOutput.ReadToEndAsync(); $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(8000)) {
+            $process.Kill(); [void]$process.WaitForExit(1000)
+            $result.code = 'helper_timeout'; return [pscustomobject]$result
+        }
+        $text = $stdout.GetAwaiter().GetResult()
+        if ($text.Length -gt 2048) { $result.code = 'helper_report_bounds'; return [pscustomobject]$result }
+        $captured = $text | ConvertFrom-Json
+        if ($captured.screenshotCaptured -isnot [bool] -or $captured.code -cnotmatch '^[a-z_]{1,60}$' -or
+            ($captured.width -isnot [long] -and $captured.width -isnot [int]) -or
+            ($captured.height -isnot [long] -and $captured.height -isnot [int]) -or
+            $captured.width -lt 0 -or $captured.width -gt 1920 -or $captured.height -lt 0 -or $captured.height -gt 1080) {
+            $result.code = 'helper_report_invalid'; return [pscustomobject]$result
+        }
+        $result.screenshotCaptured = $captured.screenshotCaptured -and $process.ExitCode -eq 0
+        $result.code = [string]$captured.code; $result.width = $captured.width; $result.height = $captured.height
+    } catch { $result.code = 'helper_failed' }
+    finally { if ($null -ne $process) { $process.Dispose() } }
+    return [pscustomobject]$result
 }
 
 function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [string]$OfficialExe) {
@@ -589,6 +632,8 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
     $samples = [Collections.Generic.List[object]]::new()
     $start = [AZSGRemoteGame]::Wall(); $firstPlayingAt = $null; $lastEnter = 0L; $lastChoice = 0L
     $movementKey = 0; $moveStage = -1; $moveStart = 0L; $inputOkay = $true; $reason = 'blocked_no_playing'
+    $startupHeld = $false; $startupHoldUntil = 0L; $lastEscapeSeq = -1L; $initialEnterSent = $false
+    $telemetryInstance = 0L; $instanceSequences = @{}; $telemetryReloaded = $false; $playingInstance = 0L
     try {
         $session.Start($info)
         while (([AZSGRemoteGame]::Wall() - $start) / 1e7 -lt 150) {
@@ -602,13 +647,35 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
             $row = $null
             while ($session.Rows.TryDequeue([ref]$row)) {
                 $sample = Read-Telemetry $row
-                if ($null -ne $sample -and $samples.Count -lt 4000 -and ($samples.Count -eq 0 -or $sample.seq -gt $samples[$samples.Count - 1].seq)) { $samples.Add($sample) }
+                if ($null -ne $sample -and $samples.Count -lt 4000) {
+                    $instanceKey = [string]$sample.instance
+                    if ($sample.instance -ne $telemetryInstance) {
+                        # Ignore delayed lines from an already retired VM. A
+                        # genuinely new VM may reset its sequence before play.
+                        if ($instanceSequences.ContainsKey($instanceKey)) { $row = $null; continue }
+                        if ($null -ne $firstPlayingAt -or $playingInstance -ne 0) {
+                            $telemetryReloaded = $true; $reason = 'blocked_telemetry_reload'; break
+                        }
+                        $telemetryInstance = $sample.instance; $lastEscapeSeq = -1L
+                    }
+                    if (-not $instanceSequences.ContainsKey($instanceKey) -or $sample.seq -gt $instanceSequences[$instanceKey]) {
+                        $instanceSequences[$instanceKey] = $sample.seq; $samples.Add($sample)
+                        if ($sample.phase -ceq 'playing') { $playingInstance = $sample.instance }
+                    }
+                }
                 $row = $null
             }
+            if ($telemetryReloaded) { break }
             $now = [AZSGRemoteGame]::Wall()
             if ($samples.Count -gt 0) {
                 $latest = $samples[$samples.Count - 1]
-                if ($latest.phase -ceq 'playing' -and $null -eq $firstPlayingAt) { $firstPlayingAt = $now }
+                if ($latest.phase -ceq 'playing' -and $null -eq $firstPlayingAt) {
+                    $firstPlayingAt = $now
+                    if ($startupHeld) { $inputOkay = $session.Key(0x57, $false) -and $inputOkay; $startupHeld = $false }
+                }
+                if ($startupHeld -and ($latest.chatOpen -eq 1 -or $latest.gameMenuShown -eq 1)) {
+                    $inputOkay = $session.Key(0x57, $false) -and $inputOkay; $startupHeld = $false
+                }
                 if ($latest.stage -eq 5) { $reason = 'observed'; break }
                 if ($latest.phase -ceq 'choosing' -and ($now - $lastChoice) / 1e7 -gt 1) { $inputOkay = $session.Tap(0x31) -and $inputOkay; $lastChoice = $now }
                 $desiredKey = 0
@@ -622,18 +689,31 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
                     if ($movementKey -ne 0) { $inputOkay = $session.Key([uint16]$movementKey, $true) -and $inputOkay }
                 }
             }
+            if ($startupHeld -and $now -ge $startupHoldUntil) {
+                $inputOkay = $session.Key(0x57, $false) -and $inputOkay; $startupHeld = $false
+            }
             if ($null -eq $firstPlayingAt -and ($now - $start) / 1e7 -gt 5 -and ($now - $lastEnter) / 1e7 -gt 5) {
                 # Loading assets or software shaders can leave no usable window
                 # yet. Retry focus only every five seconds, within the existing
                 # startup deadline; never send keys to an unavailable window.
                 $lastEnter = $now
-                if ($session.Focus()) {
-                    # Enter selects Play in the picker. Once the scene reports
-                    # ready, movement starts the run; Enter can instead open chat.
-                    if ($samples.Count -eq 0 -or $samples[$samples.Count - 1].phase -ceq 'unknown') { $inputOkay = $session.Tap(0x0d) -and $inputOkay }
-                    $inputOkay = $session.Key(0x57, $true) -and $inputOkay
-                    Start-Sleep -Milliseconds 1500
-                    $inputOkay = $session.Key(0x57, $false) -and $inputOkay
+                if ($session.Focus() -and -not $startupHeld) {
+                    if ($samples.Count -gt 0 -and ($latest.chatOpen -eq 1 -or $latest.gameMenuShown -eq 1)) {
+                        # Escape only after a newly observed open overlay. An old
+                        # flag must not toggle a now-closed menu back open.
+                        if ($latest.seq -gt $lastEscapeSeq) {
+                            $inputOkay = $session.Tap(0x1b) -and $inputOkay
+                            $lastEscapeSeq = $latest.seq
+                        }
+                    } elseif ($samples.Count -gt 0 -and $latest.phase -ceq 'ready') {
+                        # Hold across slow rendered frames while this loop keeps
+                        # draining telemetry; the playing observation releases W.
+                        $inputOkay = $session.Key(0x57, $true) -and $inputOkay
+                        $startupHeld = $inputOkay; $startupHoldUntil = $now + 40000000L
+                    } elseif (-not $initialEnterSent -and ($samples.Count -eq 0 -or $latest.phase -ceq 'unknown')) {
+                        $inputOkay = $session.Tap(0x0d) -and $inputOkay
+                        $initialEnterSent = $true
+                    }
                 }
             }
             if ($null -eq $firstPlayingAt -and ($now - $start) / 1e7 -gt 90) { break }
@@ -646,10 +726,14 @@ function Invoke-GameRun([string]$Mode, [string]$GameRoot, [string]$Assets, [stri
             }
             Start-Sleep -Milliseconds 50
         }
+        if ($startupHeld -and -not $session.Child.HasExited) { [void]$session.Key(0x57, $false); $startupHeld = $false }
+        $capture = if ($reason -cne 'observed') { Capture-BlockedFrame $session $Mode } else { [pscustomobject]@{ requested = $false; screenshotCaptured = $false; code = 'not_needed'; width = 0; height = 0 } }
         return [pscustomobject]@{ mode = $Mode; status = $reason; softwareAdapterObserved = $session.SoftwareObserved
             processExitCode = $(if ($session.Child.HasExited) { $session.Child.ExitCode } else { $null })
             gpuFailure = $session.GpuFailure; panicked = $session.Panicked
             startupCategories = @($session.StartupCategories); panicCaptureEnabled = $session.PanicCaptureEnabled; panicExcerpt = @($session.PanicExcerpt)
+            frameCapture = $capture
+            telemetryInstanceCount = $instanceSequences.Count; telemetryReloaded = $telemetryReloaded
             droppedTelemetry = $session.Dropped; samples = $samples.ToArray() }
     } finally {
         $session.Dispose()
