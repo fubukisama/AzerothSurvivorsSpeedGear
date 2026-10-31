@@ -1,0 +1,40 @@
+name: Verify recorded real-game hotkey evidence
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/verify-hotkey-trace.yml'
+      - 'tools/verify_hotkey_trace.py'
+      - 'tests/verify_hotkey_trace_test.py'
+      - 'docs/evidence/hotkeys0131raw.json'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test invalid and stale evidence rejection
+        run: python -m unittest discover -s tests -p verify_hotkey_trace_test.py -v
+      - name: Verify physical key dispatch, native receipt and saved reload
+        run: >-
+          python tools/verify_hotkey_trace.py
+          --report docs/evidence/hotkeys0131raw.json
+          --output verified/hotkeys-verdict.json
+      - name: Retain the separate functional verdict
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hotkey-functional-verdict
+          path: verified/hotkeys-verdict.json
+          if-no-files-found: warn
+          retention-days: 14

@@ -15,6 +15,23 @@ passed all 25 CTests against source `c991ded`, including that regression, modifi
 release ordering, stale-held queries, held-before-recording fallback, and capture
 cleanup. The updater, installer and parser suites also passed.
 
+The real 0.131.0 game, source `66967a6`, was then exercised with OS `SendInput`
+in three separate processes. Default Q/E produced native 0.5x, 1x and 2x
+acknowledgements. Physical panel clicks recorded R and Ctrl+T in the ready world;
+Q/E returned to their original actions. R/Ctrl+T then produced native 0.5x/1x
+with the panel hidden. After a successful normal exit and saved-file check, a
+third process loaded those bindings and repeated both native transitions.
+
+The exact [numerical report](evidence/hotkeys0131raw.json) retains its original
+**failed** status: 50 of 51 criteria passed, but the final third-process window
+close timed out after all functional assertions. The second-process normal exit,
+saved keys and third-process reload passed. That terminal cleanup failure is not
+reclassified as a successful workflow or successful shutdown. Captured images
+show a stale loading surface and do not establish fresh visual UI acceptance.
+These observations establish input dispatch, rebinding, persistence and native
+delivery on this game build, not uniform movement/skill scaling or future-build
+compatibility.
+
 Full-game runs reuse an indexed private resource bundle while the game EXE and
 MPQ manifest remain unchanged. A plugin change or rerun does not require another
 upload from the user's machine. Each disposable runner still verifies the cached
