@@ -175,7 +175,7 @@ DWORD WINAPI worker(void*) {
     productionGame=_wcsicmp(exe.filename().c_str(),L"AzerothSurvivors.exe")==0;
     if(!productionGame && _wcsicmp(exe.filename().c_str(),L"AZSSpeedGearTestHost.exe")!=0) return 0;
     root=exe.parent_path();
-    log("AzerothSurvivorsSpeedGear 0.7.1 start; default=1x; protocol=SG1");
+    log("AzerothSurvivorsSpeedGear 0.7.2 start; default=1x; protocol=SG1");
     // This ordinary worker runs after loader initialization. Never create a
     // process or wait in DllMain, a timing hook, or the game's entrypoint.
     if(productionGame) log("native-updater="+azsg::start_native_update(exe));

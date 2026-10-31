@@ -539,6 +539,7 @@ public sealed class AZSGRemoteGame : IDisposable {
     if(Has(text,"loading screen:") || Has(text,"pipeline warm:")) ObserveLoading(text);
     var at=text.IndexOf("AZSGT1|",StringComparison.Ordinal);
     if(at<0) at=text.IndexOf("AZSGH1|",StringComparison.Ordinal);
+    if(at<0) at=text.IndexOf("AZSGL1|",StringComparison.Ordinal);
     if(at<0 || text.Length-at>2048) return;
     if(Rows.Count>=8192) { System.Threading.Interlocked.Increment(ref Dropped); return; }
     Rows.Enqueue(new AZSGRemoteRow {FileTime=Wall(),Payload=text.Substring(at)});
@@ -1026,11 +1027,19 @@ try {
     $report.gameVersion = $identity.version; $report.gameSha256 = $identity.sha256
     $report.gameBytes = $identity.size; $report.officialAssetsSha256 = $identity.assetsSha256
     if ($env:AZSG_HOTKEY_ACCEPTANCE -ceq '1') {
+        if ($env:AZSG_LAUNCHER_ACCEPTANCE -ceq '1') {
+            $report.acceptanceMode = 'physical_launcher_text';
+            $report.phase = 'launcher';
+            . (Join-Path $PSScriptRoot 'remote_launcher_acceptance.ps1')
+            $hotkeys = Invoke-LauncherAcceptance -GameRoot (Join-Path $fixtureRoot 'launcher') -Assets $assets -OfficialExe $officialExe
+            $report['launcher'] = $hotkeys
+        } else {
         $report.acceptanceMode = 'physical_hotkeys';
         $report.phase = 'hotkeys';
         . (Join-Path $PSScriptRoot 'remote_hotkey_acceptance.ps1')
         $hotkeys = Invoke-HotkeyAcceptance -GameRoot (Join-Path $fixtureRoot 'hotkeys') -Assets $assets -OfficialExe $officialExe
         $report['hotkeys'] = $hotkeys
+        }
         $report.status = $hotkeys.status
         $report.reason = $hotkeys.reason
         $report.criteria = $hotkeys.criteria

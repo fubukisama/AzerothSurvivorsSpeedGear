@@ -396,6 +396,7 @@ local captions = {};
 local noticeKey = "hint";
 local lastLocaleSecond = nil;
 local lastLauncherText = nil;
+local lastLauncherTooltip = nil;
 local lastFrameGuardNotice = false;
 local lastNoticeText = nil;
 local keyManager = nil;
@@ -441,13 +442,39 @@ local function measurementMatchesTarget()
     return controller.confirmedSpeed100 == controller.speed100;
 end
 
+local function updateLauncherTooltip()
+    if (not launcher or not launcher.speedGearHovered or not GameTooltip
+        or type(GameTooltip.SetText) ~= "function" or type(GameTooltip.Show) ~= "function") then return; end
+    local text = tr("launcher_hint");
+    if (worldActive and controller.active) then
+        local key = measurementMatchesTarget() and "target_measured" or "target_wait";
+        text = string.format(tr(key), speedText(controller.speed100));
+        if (finiteNumber(controller.measured) and controller.measured > 0) then
+            text = text .. "\n" .. string.format(tr("measured"), controller.measured);
+        end
+        if (controller.measurementMismatch) then text = text .. "\n" .. tr("below_target"); end
+        if (controller.frameGuardTripped) then text = text .. "\n" .. tr("frame_guard"); end
+        text = text .. "\n" .. tr("launcher_hint");
+    elseif (worldActive) then
+        text = tr(controller.bridgeReady and "inactive" or "channel_unavailable") .. "\n" .. text;
+    end
+    if (text ~= lastLauncherTooltip) then
+        GameTooltip:SetText(text); GameTooltip:Show(); lastLauncherTooltip = text;
+    end
+end
+
 local function updateLauncher()
     if (not launcher) then return; end
     local text = tr("launcher");
     if (worldActive and controller.active) then
         if (measurementMatchesTarget()) then text = text .. " ×" .. speedText(controller.speed100);
-        else text = text .. " …"; end
+        else
+            -- Keep the requested number visible without calling it measured.
+            text = string.format(tr("launcher_target"), speedText(controller.speed100))
+                .. (controller.measurementMismatch and " !" or " …");
+        end
     end
+    updateLauncherTooltip();
     if (text ~= lastLauncherText) then
         launcher:SetText(text);
         lastLauncherText = text;
@@ -763,12 +790,19 @@ local function buildLauncher()
     launcher:SetScript("OnEnter", function()
         if (GameTooltip and type(GameTooltip.SetOwner) == "function" and type(GameTooltip.SetText) == "function" and type(GameTooltip.Show) == "function") then
             GameTooltip:SetOwner(this, "ANCHOR_LEFT");
-            GameTooltip:SetText(tr("launcher_hint"));
-            GameTooltip:Show();
+            this.speedGearHovered = true;
+            lastLauncherTooltip = nil;
+            updateLauncherTooltip();
         end
     end);
     launcher:SetScript("OnLeave", function()
+        this.speedGearHovered = false; lastLauncherTooltip = nil;
         if (GameTooltip and type(GameTooltip.Hide) == "function") then GameTooltip:Hide(); end
+    end);
+    launcher:SetScript("OnHide", function()
+        local hovered = this.speedGearHovered;
+        this.speedGearHovered = false; lastLauncherTooltip = nil;
+        if (hovered and GameTooltip and type(GameTooltip.Hide) == "function") then GameTooltip:Hide(); end
     end);
     launcher:Hide();
     Gear.launcher = launcher;

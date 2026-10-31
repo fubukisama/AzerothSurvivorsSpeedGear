@@ -1,5 +1,9 @@
 # AzerothSurvivorsSpeedGear
 
+Version 0.7.2 keeps the numeric target visible while measurement is pending:
+**Target ×2 …**. A definite mismatch uses **Target ×2 !**; only confirmed
+measurements use **Speed ×2**. Hovering shows the measurement and current status.
+
 Version 0.7.1 preserves Ctrl/Alt/Shift event order while recording a shortcut,
 including delayed key events whose native modifier query is already stale.
 An observed modifier release takes priority over that query. Ending or cancelling
@@ -50,10 +54,11 @@ independently. Closing the panel keeps the floating button available. A new
 installation initially shows just the button; existing visibility preferences
 are retained.
 
-Once measured speed is close to the requested rate, the floating button shows
-that rate, for example **Speed ×2**. An ellipsis marks an unconfirmed change;
-pauses or missing confirmation remove the success rate. This uses run-time
-measurement rather than treating a request as a native acknowledgement.
+The floating button shows the requested number immediately as **Target ×2 …**.
+It switches to **Speed ×2** only after a matching measurement, and uses
+**Target ×2 !** for a definite mismatch. Hovering shows the target, any measured
+rate and protection notice. Pauses or world exit remove the active numeric
+status. The target label is not a native acknowledgement or measured result.
 
 The UI follows the game's selected language on world entry, with complete
 catalogs for English, Simplified Chinese, Japanese, Korean, Polish, Czech,

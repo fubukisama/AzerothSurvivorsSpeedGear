@@ -540,7 +540,10 @@ fire("PLAYER_ENTERING_WORLD");
 SlashCmdList.AZSSPEEDGEAR("hide");
 SlashCmdList.AZSSPEEDGEAR("2");
 local launcherCaption = AZSSpeedGearI18n.Text("launcher");
-check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == launcherCaption .. " …",
+local function targetCaption(value, marker)
+    return string.format(AZSSpeedGearI18n.Text("launcher_target"), value) .. " " .. (marker or "…");
+end
+check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == targetCaption("2"),
     "new x2 request shows pending rather than an unverified success");
 advanceUI(2, 2);
 check(AZSSpeedGear.controller.measured and AZSSpeedGear.controller.confirmedSpeed100 == nil
@@ -557,12 +560,12 @@ check(AZSSpeedGear.controller.measurementMismatch and AZSSpeedGear.controller.co
     and hasPanelText(AZSSpeedGearI18n.Text("below_target")), "independent x4 progress against requested x2 reports a generic mismatch, not a successful speed");
 
 SlashCmdList.AZSSPEEDGEAR("5");
-check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == launcherCaption .. " …",
+check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == targetCaption("5"),
     "requesting x5 immediately removes the old confirmed x2 caption");
 advanceUI(4, 1);
 check(AZSSpeedGear.controller.measured and math.abs(AZSSpeedGear.controller.measured - 1) < 0.05 and AZSSpeedGear.controller.speed100 == 500,
     "failed x5 switch retains honest measured x1");
-check(AZSSpeedGear.launcher.text == launcherCaption .. " …",
+check(AZSSpeedGear.launcher.text == targetCaption("5", "!"),
     "measured x1 cannot confirm a requested x5 launcher suffix");
 
 SlashCmdList.AZSSPEEDGEAR("0.5");
@@ -572,12 +575,12 @@ check(AZSSpeedGear.controller.measured and math.abs(AZSSpeedGear.controller.meas
 SlashCmdList.AZSSPEEDGEAR("0.5");
 advanceUI(4, 0.25);
 check(AZSSpeedGear.controller.measured and math.abs(AZSSpeedGear.controller.measured - 0.25) < 0.05, "low-speed mismatch fixture measures actual x0.25");
-check(AZSSpeedGear.launcher.text == launcherCaption .. " …",
+check(AZSSpeedGear.launcher.text == targetCaption("0.5", "!"),
     "requested x0.5 with actual x0.25 cannot use the panel's broad absolute tolerance");
 
 SlashCmdList.AZSSPEEDGEAR("stop");
 check(AZSSpeedGear.controller.speed100 == 100 and AZSSpeedGear.controller.measured == nil
-    and AZSSpeedGear.launcher.text == launcherCaption .. " …", "emergency x1 remains pending until measured");
+    and AZSSpeedGear.launcher.text == targetCaption("1"), "emergency x1 remains pending until measured");
 advanceUI(4, 1);
 check(AZSSpeedGear.controller.measured and math.abs(AZSSpeedGear.controller.measured - 1) < 0.05 and AZSSpeedGear.launcher.text == launcherCaption .. " ×1",
     "emergency restore gains a confirmed x1 suffix only after measurement");
@@ -628,7 +631,7 @@ while (noticeIndex <= table.getn(AZSSpeedGear.panel.fontStrings)) do
 end
 check(switchingNotice ~= nil, "unconfirmed request retains a visible switching notice");
 sampleBaseline(1, 5);
-check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == baselineCaption .. " …",
+check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == targetCaption("5"),
     "baseline x5 remains pending after one integer clock tick");
 sampleBaseline(3, 5);
 check(AZSSpeedGear.controller.measured and math.abs(AZSSpeedGear.controller.measured - 5) < 0.05 and AZSSpeedGear.launcher.text == baselineCaption .. " ×5",
@@ -642,10 +645,10 @@ local rapidIndex = 1;
 while (rapidIndex <= table.getn(rapidSpeeds)) do
     local nextRate = rapidSpeeds[rapidIndex] / 100;
     SlashCmdList.AZSSPEEDGEAR(tostring(nextRate));
-    check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == baselineCaption .. " …",
+    check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == targetCaption(tostring(nextRate)),
         "rapid switch immediately removes previous confirmation " .. rapidIndex);
     sampleBaseline(1, nextRate);
-    check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == baselineCaption .. " …",
+    check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == targetCaption(tostring(nextRate)),
         "rapid switch cannot inherit a previous measurement " .. rapidIndex);
     rapidIndex = rapidIndex + 1;
 end
@@ -664,7 +667,7 @@ while (transientIndex <= table.getn(transientPhases)) do
     gamePhase = "playing";
     driver.scripts.OnUpdate();
     check(AZSSpeedGear.controller.active and AZSSpeedGear.controller.speed100 == 500
-        and AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == baselineCaption .. " …",
+        and AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == targetCaption("5"),
         "same-second resume retains target but restarts confirmation " .. transientPhases[transientIndex]);
     check(table.getn(writes) == beforeTransient + 2
         and string.find(writes[beforeTransient + 1], "|100|0$") ~= nil
@@ -679,7 +682,7 @@ print("SEAM LIMIT: integer time() cannot establish a 0.2s delay or whether both 
 
 sampleBaseline(4, 4.4);
 check(AZSSpeedGear.controller.speed100 == 500 and AZSSpeedGear.controller.confirmedSpeed100 == nil
-    and AZSSpeedGear.launcher.text == baselineCaption .. " …",
+    and AZSSpeedGear.launcher.text == targetCaption("5"),
     "sustained twelve-percent deviation revokes x5 confirmation within the bounded grace period");
 sampleBaseline(8, 4.9);
 check(AZSSpeedGear.controller.speed100 == 500 and AZSSpeedGear.launcher.text == baselineCaption .. " ×5",
@@ -687,15 +690,15 @@ check(AZSSpeedGear.controller.speed100 == 500 and AZSSpeedGear.launcher.text == 
 print("BASELINE fixed target x5: sustained x4.4 revokes confirmation; fresh x4.9 observations can re-establish it");
 sampleBaseline(4, 1);
 check(AZSSpeedGear.controller.confirmedSpeed100 == nil
-    and AZSSpeedGear.launcher.text == baselineCaption .. " …", "a clear speed failure immediately revokes prior confirmation");
+    and AZSSpeedGear.launcher.text == targetCaption("5", "!"), "a clear speed failure immediately revokes prior confirmation");
 sampleBaseline(1, 4.4);
-check(AZSSpeedGear.controller.confirmedSpeed100 == nil and AZSSpeedGear.launcher.text == baselineCaption .. " …",
+check(AZSSpeedGear.controller.confirmedSpeed100 == nil and AZSSpeedGear.launcher.text == targetCaption("5"),
     "hysteresis cannot grant a fresh confirmation outside the strict entry threshold");
 sampleBaseline(8, 4.9);
 check(AZSSpeedGear.controller.confirmedSpeed100 == 500, "matching observation can re-establish confirmation after a real mismatch");
 sampleBaseline(4, 0);
 check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.controller.confirmedSpeed100 == nil
-    and AZSSpeedGear.launcher.text == baselineCaption .. " …", "a frozen run clock cannot retain a successful speed caption");
+    and AZSSpeedGear.launcher.text == targetCaption("5"), "a frozen run clock cannot retain a successful speed caption");
 ConsoleExec = nil;
 local writesWithoutConsole = table.getn(writes);
 advanceUI(5, 5);
@@ -768,7 +771,7 @@ end
 check(AZSSpeedGear.controller.speed100 == 100 and AZSSpeedGear.controller.desiredSpeed100 == 100
     and table.getn(writes) == guardWrites + 1 and string.find(writes[table.getn(writes)], "|100|1$") ~= nil,
     "third slow production frame immediately requests active x1 through the real CVar adapter");
-check(AZSSpeedGear.controller.confirmedSpeed100 == nil and AZSSpeedGear.launcher.text == guardLauncherCaption .. " …",
+check(AZSSpeedGear.controller.confirmedSpeed100 == nil and AZSSpeedGear.launcher.text == targetCaption("1"),
     "automatic restore immediately removes the old confirmed x2 without claiming unmeasured x1");
 check(hasPanelText(AZSSpeedGearI18n.Text("frame_guard")) and not AZSSpeedGear.panel.shown,
     "hidden panel retains the localized reason for automatic restore");

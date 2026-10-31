@@ -1,5 +1,23 @@
 # Validation — updated 2026-10-31
 
+## Version 0.7.2 numeric launcher while confirmation is pending
+
+The new production-UI regression failed against the previous display in remote
+[run 41185652630](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41185652630):
+a fresh 2x request left only the launcher name and an ellipsis, with no number.
+The launcher now labels unconfirmed values as a numeric target, distinguishes a
+definite mismatch, and reserves the unqualified speed caption for measured
+confirmation. Hover text explains the target, available measurement and guard
+notice, including live changes while hovered. All fourteen locales provide the
+target label.
+
+The regression uses independent real, client and raw publication clocks, including
+36 seconds of staggered 5 Hz publications, a wrong actual rate, actual frame-guard
+restoration, pause/world exit, localization and real measurement confirmation.
+The estimator and its false-confirmation protections are unchanged: conservative
+or interrupted observations may remain unconfirmed, but the requested number
+stays visible without being represented as a measured result.
+
 ## Version 0.7.1 queued modifier capture
 
 The production-UI regression failed on the previous recorder in remote
