@@ -511,12 +511,10 @@ local lastHotkeyText = nil;
 local customTyping = false;
 local saveBindingsWrapped = false;
 local layoutPanel = nil;
-local panelDirty = true;
 local panelWidgets = nil;
-local detailsOpen = false;
-local measureFont = nil;
-local widthCache, widthCacheCount = {}, 0;
-local lastPresetSelection = nil;
+-- Lua 5.0 limits each closure to 32 upvalues. Keep layout bookkeeping in one
+-- owner rather than making buildPanel capture every individual state field.
+local layoutState = { dirty = true, detailsOpen = false, widthCache = {}, widthCacheCount = 0 };
 
 local function bindText(widget, key)
     table.insert(captions, { widget = widget, key = key });
@@ -618,7 +616,7 @@ local function refreshHotkeys()
     if (signature ~= lastHotkeyText) then
         hotkeyDownButton:SetText(downText); hotkeyUpButton:SetText(upText);
         hotkeyHint:SetText(hint); lastHotkeyText = signature;
-        panelDirty = true;
+        layoutState.dirty = true;
         if (layoutPanel and panelWidgets) then layoutPanel(); end
     end
 end
@@ -666,7 +664,7 @@ local function setShown(shown)
     if (panel) then
         if (db.show) then
             panel:Show();
-            panelDirty = true;
+            layoutState.dirty = true;
             if (layoutPanel) then layoutPanel(); end
         else
             customTyping = false;
@@ -685,13 +683,13 @@ end
 local function render()
     updateLauncher();
     refreshHotkeys();
-    if (panelWidgets and controller.desiredSpeed100 ~= lastPresetSelection) then
+    if (panelWidgets and controller.desiredSpeed100 ~= layoutState.lastPresetSelection) then
         local _, button;
         for _, button in ipairs(panelWidgets.presets) do
             local method = button.speedGearValue == controller.desiredSpeed100 and "LockHighlight" or "UnlockHighlight";
             if (type(button[method]) == "function") then button[method](button); end
         end
-        lastPresetSelection = controller.desiredSpeed100;
+        layoutState.lastPresetSelection = controller.desiredSpeed100;
     end
     local guardNotice = controller.frameGuardTripped and controller.bridgeReady;
     if (guardNotice and controller.active and not lastFrameGuardNotice) then chat(tr("frame_guard")); end
@@ -703,7 +701,7 @@ local function render()
     if (noticeLabel and notice ~= lastNoticeText) then
         noticeLabel:SetText(notice);
         lastNoticeText = notice;
-        panelDirty = true;
+        layoutState.dirty = true;
     end
     if (not statusLabel) then return; end
     local status = "";
@@ -742,9 +740,9 @@ local function render()
         measurementLabel:SetText(measurement);
         if (sendStatusLabel) then sendStatusLabel:SetText(sending); end
         lastRendered = signature;
-        panelDirty = true;
+        layoutState.dirty = true;
     end
-    if (panelDirty and layoutPanel) then layoutPanel(); end
+    if (layoutState.dirty and layoutPanel) then layoutPanel(); end
 end
 
 local function requestSpeed(value)
@@ -870,21 +868,21 @@ local function textWidth(widget)
     local text = widgetValue(widget, "GetText") or "";
     local size = widget.speedGearTextSize or 11;
     local cacheKey = tostring(size) .. ":" .. text;
-    if (widthCache[cacheKey]) then return widthCache[cacheKey]; end
+    if (layoutState.widthCache[cacheKey]) then return layoutState.widthCache[cacheKey]; end
     local font = widget;
     if (type(widget.GetFontString) == "function") then font = widgetValue(widget, "GetFontString") or widget; end
     -- Measure outside the live label's wrapping constraint. Otherwise a long
     -- chord could shrink on every reflow as its wrapped line gets measured.
-    if (measureFont) then
-        setWidgetFont(measureFont, size);
-        measureFont:SetText(text);
-        font = measureFont;
+    if (layoutState.measureFont) then
+        setWidgetFont(layoutState.measureFont, size);
+        layoutState.measureFont:SetText(text);
+        font = layoutState.measureFont;
     end
     if (type(font.GetStringWidth) == "function") then
         local value = widgetValue(font, "GetStringWidth");
         if (finiteNumber(value) and value > 0) then
-            if (widthCacheCount >= 256) then widthCache = {}; widthCacheCount = 0; end
-            widthCache[cacheKey] = value; widthCacheCount = widthCacheCount + 1;
+            if (layoutState.widthCacheCount >= 256) then layoutState.widthCache = {}; layoutState.widthCacheCount = 0; end
+            layoutState.widthCache[cacheKey] = value; layoutState.widthCacheCount = layoutState.widthCacheCount + 1;
             return value;
         end
     end
@@ -962,9 +960,9 @@ end
 layoutPanel = function()
     if (not panelWidgets or panel.speedGearDragging) then return; end
     if (widgetValue(panel, "IsShown") == false) then return; end
-    panelDirty = false;
+    layoutState.dirty = false;
     local w = panelWidgets;
-    w.details:SetText((detailsOpen and "- " or "+ ") .. tr("details"));
+    w.details:SetText((layoutState.detailsOpen and "- " or "+ ") .. tr("details"));
     local closeWidth, closeHeight = fitButton(w.close, 160);
     local width = math.max(360, math.ceil(textWidth(w.title) + closeWidth + 44));
     local viewport = widgetValue(UIParent, "GetWidth");
@@ -1031,7 +1029,7 @@ layoutPanel = function()
     if (stopWidth + detailWidth + gap > content) then y = y + stopHeight + gap; end
     placeWidget(w.details, width - padding - detailWidth, y, detailWidth, detailHeight);
     y = y + math.max(stopHeight, detailHeight);
-    if (detailsOpen) then
+    if (layoutState.detailsOpen) then
         y = y + 12;
         y = y + label(sendStatusLabel, y) + 6;
         y = y + label(w.commands, y) + 6;
@@ -1111,13 +1109,13 @@ local function buildPanel()
     panel:SetHeight(280);
     panel:SetPoint("CENTER", UIParent, "CENTER", 0, 0);
     panel:SetFrameStrata("DIALOG");
-    measureFont = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal");
-    measureFont:SetWidth(10000); measureFont:SetHeight(1000); measureFont:Hide();
+    layoutState.measureFont = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal");
+    layoutState.measureFont:SetWidth(10000); layoutState.measureFont:SetHeight(1000); layoutState.measureFont:Hide();
     panel:SetMovable(true);
     panel:EnableMouse(true);
     panel:RegisterForDrag("LeftButton");
     panel:SetScript("OnHide", function() customTyping = false; stopHotkeyCapture(); end);
-    panel:SetScript("OnShow", function() panelDirty = true; if (layoutPanel) then layoutPanel(); end end);
+    panel:SetScript("OnShow", function() layoutState.dirty = true; if (layoutPanel) then layoutPanel(); end end);
     if (type(panel.SetClampedToScreen) == "function") then pcall(panel.SetClampedToScreen, panel, true); end
     panel:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = false, edgeSize = 12, insets = { left = 4, right = 4, top = 4, bottom = 4 } });
     panel:SetBackdropColor(0.055, 0.05, 0.045, 0.97);
@@ -1138,7 +1136,7 @@ local function buildPanel()
         db.relativePoint = relativePoint;
         db.x = x;
         db.y = y;
-        panelDirty = true; if (layoutPanel) then layoutPanel(); end
+        layoutState.dirty = true; if (layoutPanel) then layoutPanel(); end
     end);
     local w = {};
     w.title = addText(panel, 13, 16, -16, "title");
@@ -1209,7 +1207,7 @@ local function buildPanel()
     textColor(noticeLabel, 1, 0.82, 0.38);
     w.hotkeyHint, w.notice = hotkeyHint, noticeLabel;
     w.details = addButton(panel, "AZSSpeedGearDetails", "details", 0, 0, 44, function()
-        detailsOpen = not detailsOpen; panelDirty = true; layoutPanel();
+        layoutState.detailsOpen = not layoutState.detailsOpen; layoutState.dirty = true; layoutPanel();
     end);
     w.commands = addText(panel, 10, 0, 0, "commands");
     w.hint = addText(panel, 10, 0, 0, "hint");
@@ -1257,8 +1255,8 @@ local function slash(message)
 end
 
 I18n.Listen(function()
-    panelDirty = true;
-    widthCache = {}; widthCacheCount = 0;
+    layoutState.dirty = true;
+    layoutState.widthCache = {}; layoutState.widthCacheCount = 0;
     local index = 1;
     while (index <= table.getn(captions)) do
         local entry = captions[index];
