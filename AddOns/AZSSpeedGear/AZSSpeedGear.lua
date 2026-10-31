@@ -46,6 +46,10 @@ function Gear.NewController(api)
     self.lastSent = nil;
     self.lastPulse = nil;
     self.measured = nil;
+    self.measurementLower = nil;
+    self.measurementUpper = nil;
+    self.measureBuckets = {};
+    self.rawProgressAt = nil;
     self.confirmedSpeed100 = nil;
     self.measurePendingAt = nil;
     self.measureUncertainty = nil;
@@ -86,6 +90,13 @@ function Gear.NewController(api)
 
     function self:ResetMeasurement()
         self.measured = nil;
+        self.measurementLower = nil;
+        self.measurementUpper = nil;
+        self.measureBuckets = {};
+        self.rawRunValue = nil;
+        self.rawRunUpdated = nil;
+        self.rawSeenAt = nil;
+        self.rawProgressAt = nil;
         self.measurementMismatch = false;
         self.confirmedSpeed100 = nil;
         self.measurePendingAt = nil;
@@ -169,83 +180,125 @@ function Gear.NewController(api)
         return ok and result ~= false;
     end
 
+    local function seedMeasurementSample(now, run, updated)
+        -- The snapshot present at reset may predate the request. Observe its
+        -- identity, but wait for a new publication before timing any progress.
+        self.rawRunValue = run; self.rawRunUpdated = updated;
+        self.rawSeenAt = now; self.rawProgressAt = now;
+        self.measureFrameWall = now;
+    end
+
     function self:Measure(now, clock, sampledClock)
         local sample = safeCall(self.api.rawRunSample);
         if (not now or type(sample) ~= "table" or not finiteNumber(sample.t) or sample.t < 0
             or not finiteNumber(sample.updated) or sample.updated < 0) then self:ResetMeasurement(); return; end
         local run, updated = sample.t, sample.updated;
         if (not sampledClock) then clock = safeCall(self.api.clientClock); end
-        local hasClock = finiteNumber(clock) and clock >= updated;
-        if (self.rawRunValue ~= run or self.rawRunUpdated ~= updated) then
-            if (self.rawRunValue and run < self.rawRunValue) then self:ResetMeasurement(); end
-            self.rawRunValue = run;
-            self.rawRunUpdated = updated;
-            self.rawSeenAt = now;
+        -- GetTime can validate a publication stamp, but supplies no elapsed-time
+        -- scale. Neither it nor the requested multiplier is a real-time oracle.
+        if (finiteNumber(clock) and clock < updated) then self:ResetMeasurement(); return; end
+        if (self.rawRunValue == nil) then seedMeasurementSample(now, run, updated); return; end
+        if ((self.measureFrameWall and (now < self.measureFrameWall or now - self.measureFrameWall >= 2))
+            or run < self.rawRunValue or updated < self.rawRunUpdated
+            or not self.rawProgressAt or now - self.rawProgressAt >= 2) then
+            self:ResetMeasurement(); seedMeasurementSample(now, run, updated); return;
         end
-        -- A smooth getter may keep advancing on the hooked client clock after
-        -- server publications stop. Such interpolation is never measurement input.
-        if (not self.rawSeenAt or now < self.rawSeenAt) then self.rawSeenAt = now; self:ResetMeasurement(); end
-        if (now - self.rawSeenAt >= 2) then self:ResetMeasurement(); return; end
-
-        local uncertainty = 1;
-        local boundary = self.measureFrameWall and now ~= self.measureFrameWall;
-        if (boundary and now == self.measureFrameWall + 1 and hasClock
-            and finiteNumber(self.measureFrameClock) and clock > self.measureFrameClock) then
-            -- Optional GetTime only bounds observation phase; it is NOT wall
-            -- time and is never divided by the requested speed. This assumes the
-            -- supported unclamped frame clock advances at least 0.25x wall time.
-            -- A 0.02 virtual-second margin covers pace/quantization uncertainty.
-            uncertainty = math.min(1, (clock - self.measureFrameClock + 0.02) / 0.25);
-        end
-        if (self.measureFrameWall and now < self.measureFrameWall) then self:ResetMeasurement(); boundary = false; end
         self.measureFrameWall = now;
-        self.measureFrameClock = hasClock and clock or nil;
-        if (not self.measurePendingAt) then self.measurePendingAt = now; return; end
-        if (now <= self.measurePendingAt or not boundary) then return; end
+        if (run == self.rawRunValue and updated == self.rawRunUpdated) then return; end
+        if (run > self.rawRunValue) then self.rawProgressAt = now; end
+        self.rawRunValue = run; self.rawRunUpdated = updated; self.rawSeenAt = now;
 
-        -- The raw clock belongs to its last received publication, not this
-        -- OnUpdate. Bound that cached age under the same minimum-clock-rate
-        -- assumption; unknown transport/publication latency remains outside this
-        -- estimate, so this is not certification of physical simulation speed.
-        local rawAge = 0;
-        if (hasClock) then rawAge = (clock - updated + 0.02) / 0.25; end
-        if (not self.measureStart) then
-            self.measureStart = now; self.measureRun = run;
-            self.measureUncertainty = uncertainty; self.measureRawAge = rawAge;
-            return;
+        -- Only fresh raw arrivals enter the meter. Their unhooked integer wall
+        -- stamp W bounds arrival time to [W,W+1). Per-second extrema preserve
+        -- all pairwise rate constraints while keeping at most 17 small buckets.
+        -- Unknown packet-delivery latency remains outside this observed-arrival
+        -- rate estimate; it does not certify movement or skill timing.
+        local buckets = self.measureBuckets;
+        local count = table.getn(buckets);
+        local bucket = buckets[count];
+        if (bucket and bucket.wall == now) then
+            bucket.minimum = math.min(bucket.minimum, run);
+            bucket.maximum = math.max(bucket.maximum, run);
+        else
+            table.insert(buckets, { wall = now, minimum = run, maximum = run });
         end
-        local elapsed = now - self.measureStart;
-        if (elapsed < 1) then return; end
-        local delta = run - self.measureRun;
+        while (table.getn(buckets) > 0 and buckets[1].wall < now - 16) do table.remove(buckets, 1); end
+        count = table.getn(buckets);
+
+        -- Intersect the exact coarse-time constraints of a constant arrival
+        -- rate: deltaRaw/(deltaWall+1) <= rate <= deltaRaw/(deltaWall-1).
+        -- The upper bound exists only across more than one integer second.
+        -- Retain the longest consistent suffix, dropping incompatible older
+        -- history after a rate change rather than poisoning a recovery window.
+        local lower, upper, first = 0, nil, count;
+        local inconsistent = false;
+        local index = count;
+        while (index >= 1) do
+            local current = buckets[index];
+            local nextLower = math.max(lower, current.maximum - current.minimum);
+            local nextUpper = upper;
+            local later = index + 1;
+            while (later <= count) do
+                local other = buckets[later];
+                local elapsed = other.wall - current.wall;
+                nextLower = math.max(nextLower, (other.maximum - current.minimum) / (elapsed + 1));
+                if (elapsed > 1) then
+                    local limit = (other.minimum - current.maximum) / (elapsed - 1);
+                    if (not nextUpper or limit < nextUpper) then nextUpper = limit; end
+                end
+                later = later + 1;
+            end
+            local epsilon = 1e-8 * math.max(1, math.abs(nextLower), math.abs(nextUpper or 0));
+            if (nextUpper and nextLower > nextUpper + epsilon) then inconsistent = true; break; end
+            lower, upper, first = nextLower, nextUpper, index;
+            index = index - 1;
+        end
+        while (first > 1) do table.remove(buckets, 1); first = first - 1; end
+        count = table.getn(buckets);
+        self.measurementLower = lower;
+        self.measurementUpper = upper;
+
+        -- The display estimate uses completed middle-bucket centers, never the
+        -- target. Their slope avoids bias from the partial first/current bucket.
+        -- Confirmation below still requires the entire conservative interval.
+        local estimate = nil;
+        if (count >= 4) then
+            local base = buckets[2];
+            local baseRaw = (base.minimum + base.maximum) / 2;
+            local samples, sumX, sumY, sumXX, sumXY = 0, 0, 0, 0, 0;
+            index = 2;
+            while (index < count) do
+                local point = buckets[index];
+                local x = point.wall - base.wall;
+                local y = (point.minimum + point.maximum) / 2 - baseRaw;
+                samples = samples + 1; sumX = sumX + x; sumY = sumY + y;
+                sumXX = sumXX + x * x; sumXY = sumXY + x * y;
+                index = index + 1;
+            end
+            local denominator = samples * sumXX - sumX * sumX;
+            if (denominator > 0) then estimate = (samples * sumXY - sumX * sumY) / denominator; end
+        end
+        if (not finiteNumber(estimate) and upper) then estimate = (lower + upper) / 2; end
         self.measured = nil;
-        if (delta > 0) then self.measured = delta / elapsed; end
-        local lowerElapsed = elapsed - self.measureUncertainty - rawAge;
-        local upperElapsed = elapsed + uncertainty + self.measureRawAge;
-        local low, high = nil, nil;
-        if (delta > 0 and lowerElapsed > 0 and upperElapsed > 0) then
-            low = delta / upperElapsed; high = delta / lowerElapsed;
+        if (finiteNumber(estimate) and estimate > 0 and buckets[count].wall - buckets[1].wall >= 2) then
+            estimate = math.max(lower, estimate);
+            if (upper) then estimate = math.min(upper, estimate); end
+            if (estimate > 0) then self.measured = estimate; end
         end
         local target = self.speed100 / 100;
-        self.measurementMismatch = low and (high < target * 0.90 or low > target * 1.10) or false;
-        local retained = self.confirmedSpeed100 == self.speed100;
-        local tolerance = 0.10;
-        local contained = hasClock and low and low >= target * (1 - tolerance) and high <= target * (1 + tolerance);
+        local epsilon = 1e-8 * math.max(1, target);
+        local outside = lower > target * 1.10 + epsilon or (upper and upper < target * 0.90 - epsilon);
+        self.measurementMismatch = outside and true or false;
+        local contained = self.measured and upper and lower >= target * 0.90 - epsilon
+            and upper <= target * 1.10 + epsilon;
         if (contained) then
-            self.confirmedSpeed100 = self.speed100;
-            self.confirmedAt = now;
-        elseif (retained) then
-            local outside = not self.measured or (low and (high < target * 0.90 or low > target * 1.10));
-            if (outside or not self.confirmedAt or now - self.confirmedAt >= 4) then
+            -- A live sliding window refreshes confidence without discarding the
+            -- very observations that established it. There is no 12s restart.
+            self.confirmedSpeed100 = self.speed100; self.confirmedAt = now;
+        elseif (self.confirmedSpeed100 == self.speed100) then
+            if (outside or inconsistent or not self.measured or not self.confirmedAt or now - self.confirmedAt >= 4) then
                 self.confirmedSpeed100 = nil; self.confirmedAt = nil;
             end
-        end
-        -- Keep accumulating when the interval is too wide. Resetting each short
-        -- window would otherwise make conservative confirmation impossible.
-        -- A definite mismatch is also a completed observation. Do not keep
-        -- averaging it into a later genuine rate change during recovery.
-        if (contained or self.measurementMismatch or elapsed >= 12) then
-            self.measureStart = now; self.measureRun = run;
-            self.measureUncertainty = uncertainty; self.measureRawAge = rawAge;
         end
     end
 

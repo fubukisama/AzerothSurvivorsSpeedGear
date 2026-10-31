@@ -1030,6 +1030,9 @@ try {
         if ($env:AZSG_LAUNCHER_ACCEPTANCE -ceq '1') {
             $report.acceptanceMode = 'physical_launcher_text';
             $report.phase = 'launcher';
+            if ($env:AZSG_CONFIRMATION_ACCEPTANCE -ceq '1') {
+                $report.acceptanceMode = 'stable_measured_confirmation'; $report.phase = 'confirmation';
+            }
             . (Join-Path $PSScriptRoot 'remote_launcher_acceptance.ps1')
             $hotkeys = Invoke-LauncherAcceptance -GameRoot (Join-Path $fixtureRoot 'launcher') -Assets $assets -OfficialExe $officialExe
             $report['launcher'] = $hotkeys

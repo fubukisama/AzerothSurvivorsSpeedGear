@@ -47,7 +47,7 @@ std::string azsg::diagnostics_json(const Diagnostics& state) {
     for(const auto candidate:modes) if(candidate==state.transport) mode=candidate;
     if(state.backend!=BackendState::ready) mode="disabled";
     const auto rate=state.speed100>=25 && state.speed100<=1000?state.speed100:100;
-    return std::string(signature)+"\"version\":\"0.7.2\",\"updatedUnix\":"+std::to_string(state.updated_unix)+
+    return std::string(signature)+"\"version\":\"0.7.3\",\"updatedUnix\":"+std::to_string(state.updated_unix)+
         ",\"backend\":\""+backend_name(state.backend)+"\",\"transport\":\""+std::string(mode)+
         "\",\"speed100\":"+std::to_string(rate)+",\"heartbeatAgeMs\":"+
         (state.heartbeat_age_ms?std::to_string(*state.heartbeat_age_ms):"null")+

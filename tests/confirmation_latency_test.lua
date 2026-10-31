@@ -94,7 +94,7 @@ end
 
 -- The publication period is physical 0.2 seconds, deliberately independent of
 -- client time, requested speed and integer-second observation boundaries.
-local rates = { 0.25, 0.5, 1, 2, 5 };
+local rates = { 0.25, 0.5, 1, 2, 3, 5, 10 };
 local offsets = { 0.01, 0.07, 0.19 };
 local _, rate, offset;
 for _, rate in ipairs(rates) do

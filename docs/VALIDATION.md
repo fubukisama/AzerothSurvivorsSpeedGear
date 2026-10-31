@@ -1,5 +1,29 @@
 # Validation — updated 2026-10-31
 
+## Version 0.7.3 continuous measured confirmation
+
+Remote [run 41188103962](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41188103962)
+reproduced the old estimator's starvation and flicker with independent clocks:
+stable 2x at publication phase 0.07 never confirmed in 36 seconds; phase 0.19
+first confirmed after 5.9 seconds and dropped confirmation six times. Stable 5x
+could remain unconfirmed or wait 12.9 seconds before subsequently dropping it.
+
+The revised estimator records fresh raw publications in at most seventeen
+integer-wall-time buckets. It intersects the rate bounds allowed by all arrival
+pairs in the newest consistent history, preserving their timing uncertainty.
+Completed bucket centers supply the display estimate independently of the target.
+Confidence requires the whole feasible interval to fit the existing 10% range;
+neither the requested speed nor a scaled client clock supplies elapsed real time.
+Live matching history refreshes confidence without a twelve-second restart.
+Old inconsistent history, definite mismatches, missing progress and stage changes
+revoke confidence. Unknown packet-delivery latency remains outside this observed
+arrival-rate estimate, which is not a movement or skill-speed certification.
+
+The new regression exercises seven rates from 0.25x through 10x at three
+publication phases, requiring confirmation within five seconds at its 30/60 FPS
+cadences and no drops over the following thirty seconds. It also checks wrong
+rates, independent client-clock changes, recovery and frozen raw data.
+
 ## Version 0.7.2 numeric launcher while confirmation is pending
 
 The new production-UI regression failed against the previous display in remote

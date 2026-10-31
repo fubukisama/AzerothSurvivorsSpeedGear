@@ -1,5 +1,11 @@
 # AzerothSurvivorsSpeedGear
 
+Version 0.7.3 measures fresh raw publications against independent wall-clock
+seconds in a continuously updated bounded window. Confirmation no longer clears
+its own evidence or repeatedly restarts after twelve seconds. Confidence still
+requires the whole possible rate interval to match; wrong, frozen or interrupted
+progress revokes it. Sparse observations can require longer to become conclusive.
+
 Version 0.7.2 keeps the numeric target visible while measurement is pending:
 **Target ×2 …**. A definite mismatch uses **Target ×2 !**; only confirmed
 measurements use **Speed ×2**. Hovering shows the measurement and current status.
@@ -128,10 +134,12 @@ infer a connected channel from the presence of `ConsoleExec`. The addon-list
 and panel title are always **AzerothSurvivorsSpeedGear**; controls retain all
 fourteen game languages.
 
-The launcher compares fresh raw game-time progress against wall-clock observations.
-It accounts for integer-second sampling uncertainty instead of treating two late
-observations as exact second boundaries. Sparse samples can take longer to establish
-confirmation; missing or frozen raw snapshots cannot confirm an interpolated clock.
+The launcher compares fresh raw game-time publications against independent
+integer wall-clock observations. A bounded sliding history intersects the possible
+rates allowed by their integer-second timestamps; the requested rate and scaled
+client clock never supply elapsed real time. Live matching data maintains
+confirmation. Sparse samples can take longer to become conclusive, and missing or
+frozen raw snapshots cannot confirm an interpolated clock.
 This display delay is separate from command delivery. A new request, substantial
 mismatch, freeze or pause clears confirmation. This estimates the observed run
 clock, rather than certifying movement, skill behavior or native receipt.

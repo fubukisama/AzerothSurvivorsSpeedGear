@@ -85,7 +85,10 @@ emit = function()
         .. "|" .. hex(actual) .. "|" .. hex(expected) .. "|" .. actions .. "|" .. direction
         .. "|" .. before .. "|" .. after .. "|" .. accepted .. "|" .. frames
         .. "|" .. string.format("%.6f", number(run.t)) .. "|" .. shown(ChatFrameEditBox)
-        .. "|" .. shown(GameMenuFrame) .. "|" .. (i18n.code or "unknown") .. "|" .. kind;
+        .. "|" .. shown(GameMenuFrame) .. "|" .. (i18n.code or "unknown") .. "|" .. kind
+        .. "|" .. string.format("%.0f", number(safe(time)))
+        .. "|" .. string.format("%.6f", number(controller.measurementLower))
+        .. "|" .. string.format("%.6f", number(controller.measurementUpper));
     SetCVar(cvar, payload); ConsoleExec(cvar);
 end;
 frame:RegisterEvent("PLAYER_ENTERING_WORLD");
