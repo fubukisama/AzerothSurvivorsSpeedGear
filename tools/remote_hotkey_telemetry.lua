@@ -11,6 +11,7 @@ local playingOptionAttempts = 0;
 local captureWrapper;
 local captureEvents = 0;
 local captureKey, captureCtrl, captureShift, captureAlt = "none", "none", "none", "none";
+local originalQ, originalE;
 local emit;
 local function safe(fn)
     if (type(fn) ~= "function") then return nil; end
@@ -89,6 +90,10 @@ emit = function()
     if (not initialized or not AZSSpeedGear or not AZSSpeedGear.controller) then return; end
     local gear, db = AZSSpeedGear, AZSSpeedGearDB or {};
     local controller = gear.controller;
+    if (gear.hotkeys and gear.hotkeys.owned) then
+        if (not originalQ and gear.hotkeys.owned.Q) then originalQ = token(gear.hotkeys.owned.Q.base); end
+        if (not originalE and gear.hotkeys.owned.E) then originalE = token(gear.hotkeys.owned.E.base); end
+    end
     seq = seq + 1;
     local capture = gear.panel and gear.panel:GetScript("OnKeyDown") and 1 or 0;
     local run = type(AZS_RUN) == "table" and AZS_RUN or {};
@@ -102,7 +107,8 @@ emit = function()
         .. "|" .. center(gear.launcher) .. "|" .. center(AZSSpeedGearHotkeyDown) .. "|" .. center(AZSSpeedGearHotkeyUp)
         .. "|" .. center(AZSSpeedGearClose) .. "|" .. center(AZSSpeedGearStop)
         .. "|" .. captureKey .. "|" .. captureCtrl .. "|" .. captureShift .. "|" .. captureAlt
-        .. "|" .. rawModifier(IsControlKeyDown) .. "|" .. captureEvents;
+        .. "|" .. rawModifier(IsControlKeyDown) .. "|" .. captureEvents
+        .. "|" .. (originalQ or "none") .. "|" .. (originalE or "none");
     SetCVar(cvar, payload); ConsoleExec(cvar);
 end;
 frame:RegisterEvent("PLAYER_ENTERING_WORLD");

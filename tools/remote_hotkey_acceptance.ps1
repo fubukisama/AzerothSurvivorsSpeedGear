@@ -33,12 +33,13 @@ public static class AZSGHotkeyMouse {
         $match = [regex]::Match($Row.Payload, '^(AZSGH1\|[A-Za-z0-9_.|_-]{1,1800})(?:[^A-Za-z0-9_.|_-]|$)')
         if (-not $match.Success) { return $null }
         $p = $match.Groups[1].Value.Split('|')
-        if ($p.Count -ne 41) { return $null }
+        if ($p.Count -ne 43) { return $null }
         try {
             $r = [ordered]@{ fileTime=[long]$Row.FileTime; seq=[long]$p[1]; instance=[long]$p[2]; phase=$p[3]; desired=[int]$p[4]; speed=[int]$p[5]; guard=[int]$p[6]; active=[int]$p[7]; down=$p[8]; up=$p[9]; q=$p[10]; e=$p[11]; r=$p[12]; ctrlT=$p[13]; capture=[int]$p[14]; panel=[int]$p[15]; actions=[int]$p[16]; direction=[int]$p[17]; before=[int]$p[18]; after=[int]$p[19]; accepted=[int]$p[20]; frames=[int]$p[21]; rawT=[double]::Parse($p[22],[Globalization.CultureInfo]::InvariantCulture); chat=[int]$p[23]; menu=[int]$p[24] }
             $names = @('launcher','downButton','upButton','closeButton','stopButton')
             for ($i=0; $i -lt 5; $i++) { $r[$names[$i]] = @([double]::Parse($p[25+$i*2],[Globalization.CultureInfo]::InvariantCulture), [double]::Parse($p[26+$i*2],[Globalization.CultureInfo]::InvariantCulture)) }
             $r.captureKey=$p[35]; $r.captureCtrl=$p[36]; $r.captureShift=$p[37]; $r.captureAlt=$p[38]; $r.currentCtrl=$p[39]; $r.captureEvents=[int]$p[40]
+            $r.originalQ=$p[41]; $r.originalE=$p[42]
             return [pscustomobject]$r
         } catch { return $null }
     }
@@ -121,7 +122,7 @@ public static class AZSGHotkeyMouse {
         if ($Modifier -ne 0) { Pause-Hotkey 450; Key-Hotkey $Modifier $false }
     }
     function Click-Hotkey([string]$Name) {
-        Wait-Hotkey ('ui_'+$Name+'_playing') { $script:hk.current.phase -ceq 'playing' -and $script:hk.current.active -eq 1 -and -not $script:hk.choiceHeld }
+        Wait-Hotkey ('ui_'+$Name+'_world') { ($script:hk.current.phase -ceq 'ready' -or ($script:hk.current.phase -ceq 'playing' -and $script:hk.current.active -eq 1)) -and -not $script:hk.choiceHeld }
         $point=$script:hk.current.$Name; $size=$script:hk.session.ClientSize()
         if ($null -eq $size -or $null -eq $point -or $point.Count -ne 2 -or $point[0] -le 0 -or $point[0] -ge 1 -or $point[1] -le 0 -or $point[1] -ge 1 -or -not $script:hk.session.Focus()) { throw 'blocked_button_coordinates' }
         $x=[int][Math]::Round($point[0]*$size[0]); $y=[int][Math]::Round($point[1]*$size[1])
@@ -201,7 +202,7 @@ public static class AZSGHotkeyMouse {
         Wait-Hotkey ($Name+'_frames') { $script:hk.current.frames -ge $frame+3 }
         Assert-Hotkey $Name ($script:hk.current.actions -eq $count) $script:hk.current
     }
-    function Start-HotkeySession([int]$Number) {
+    function Start-HotkeySession([int]$Number,[switch]$ReadyOnly) {
         $script:hk.current=$null; $script:hk.rows=[Collections.Generic.List[object]]::new(); $script:hk.native=[Collections.Generic.List[object]]::new(); $script:hk.input=[Collections.Generic.List[object]]::new()
         $script:hk.nativeLog=[Collections.Generic.List[object]]::new(); $script:hk.nativeLogSeen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         $script:hk.choiceHeld=$false; $script:hk.choiceStart=0L; $script:hk.choiceFrame=0; $script:hk.choiceLast=0L; $script:hk.choiceAttempts=0
@@ -217,17 +218,28 @@ public static class AZSGHotkeyMouse {
         $start=[AZSGRemoteGame]::Wall(); $lastInput=0L; $held=$false; $heldUntil=0L; $lastEscape=-1L
         while (([AZSGRemoteGame]::Wall()-$start)/1e7 -lt $script:startupSeconds) {
             Drain-Hotkey; $now=[AZSGRemoteGame]::Wall(); $latest=$script:hk.current
-            if ($null -ne $latest -and $latest.phase -ceq 'playing' -and $latest.active -eq 1 -and -not $script:hk.choiceHeld) { if ($held) { Key-Hotkey 0x57 $false }; Assert-Hotkey ('session'+$Number+'_playing') $true $latest; return }
+            if ($ReadyOnly -and $null -ne $latest -and $latest.phase -ceq 'ready' -and $script:hk.session.LoadingClearObserved -gt 0 -and -not $script:hk.session.LoadingCoverWaiting) {
+                Assert-Hotkey ('session'+$Number+'_ready') $true $latest; return
+            }
+            if (-not $ReadyOnly -and $null -ne $latest -and $latest.phase -ceq 'playing' -and $latest.active -eq 1 -and -not $script:hk.choiceHeld) { if ($held) { Key-Hotkey 0x57 $false }; Assert-Hotkey ('session'+$Number+'_playing') $true $latest; return }
             if ($held -and $now -ge $heldUntil) { Key-Hotkey 0x57 $false; $held=$false }
             if (($now-$lastInput)/1e7 -ge 5 -and -not $script:hk.session.LoadingCoverWaiting -and -not $held) {
                 $lastInput=$now
                 if ($null -ne $latest -and ($latest.chat -eq 1 -or $latest.menu -eq 1)) { if ($latest.seq -gt $lastEscape) { Tap-Hotkey 0x1b; $lastEscape=$latest.seq } }
-                elseif ($null -ne $latest -and $latest.phase -ceq 'ready') { Key-Hotkey 0x57 $true; $held=$true; $heldUntil=$now+40000000L }
+                elseif (-not $ReadyOnly -and $null -ne $latest -and $latest.phase -ceq 'ready') { Key-Hotkey 0x57 $true; $held=$true; $heldUntil=$now+40000000L }
                 elseif ($null -eq $latest -and $script:hk.session.Focus()) { Tap-Hotkey 0x0d }
             }
             Start-Sleep -Milliseconds 50
         }
+        if ($ReadyOnly) { throw 'blocked_no_ready_world' }
         throw 'blocked_no_playing'
+    }
+    function Begin-HotkeyCombat([string]$Name) {
+        Wait-Hotkey ($Name+'_ready') { $script:hk.current.phase -ceq 'ready' -and $script:hk.current.panel -eq 0 -and $script:hk.current.capture -eq 0 }
+        Key-Hotkey 0x57 $true
+        try {
+            Wait-Hotkey ($Name+'_playing') { $script:hk.current.phase -ceq 'playing' -and $script:hk.current.active -eq 1 } 30
+        } finally { Key-Hotkey 0x57 $false }
     }
     function Save-HotkeySession([int]$Number,[bool]$Graceful) {
         if ($null -eq $script:hk.session) { return }
@@ -268,28 +280,34 @@ public static class AZSGHotkeyMouse {
         Step-Hotkey 'q_slower' 0x51 50 -1
         Step-Hotkey 'e_faster' 0x45 100 1
         Step-Hotkey 'e_accelerated' 0x45 200 1
-        $script:hk.phase='panel_rebind'
+        # Exit before routine level-up cards can interrupt unrelated UI setup.
+        Save-HotkeySession 1 $true
+        $script:hk.phase='panel_rebind_ready'; Start-HotkeySession 2 -ReadyOnly
+        Assert-Hotkey 'configuration_ready' ($script:hk.current.phase -ceq 'ready' -and $script:hk.current.active -eq 0) $script:hk.current
         Click-Hotkey 'launcher'; Wait-Hotkey 'panel_opened' { $script:hk.current.panel -eq 1 }
-        Click-Hotkey 'stopButton'; Wait-Hotkey 'panel_stop' { $script:hk.current.phase -ceq 'playing' -and $script:hk.current.active -eq 1 -and $script:hk.current.desired -eq 100 -and $script:hk.current.speed -eq 100 -and $script:hk.current.guard -eq 0 }
         Open-HotkeyCapture 'downButton' 'record_down_opened'
         Tap-Hotkey 0x52; Wait-Hotkey 'record_down_r' { $script:hk.current.down -ceq 'R' -and $script:hk.current.capture -eq 0 -and $script:hk.current.r -ceq 'AZSG_SLOWER' }
         Open-HotkeyCapture 'upButton' 'record_up_opened'
         Tap-Hotkey 0x54 0x11; Wait-Hotkey 'record_up_ctrl_t' { $script:hk.current.up -ceq 'CTRL-T' -and $script:hk.current.capture -eq 0 -and $script:hk.current.ctrlT -ceq 'AZSG_FASTER' }
+        Assert-Hotkey 'old_q_binding_restored' ($script:hk.current.q -ceq $script:hk.current.originalQ -and $script:hk.current.q -cne 'AZSG_SLOWER') $script:hk.current
+        Assert-Hotkey 'old_e_binding_restored' ($script:hk.current.e -ceq $script:hk.current.originalE -and $script:hk.current.e -cne 'AZSG_FASTER') $script:hk.current
         Capture-Hotkey 1
         Click-Hotkey 'closeButton'; Wait-Hotkey 'panel_hidden' { $script:hk.current.panel -eq 0 }
-        Unused-Hotkey 'old_q_released' 0x51; Unused-Hotkey 'old_e_released' 0x45
+        Begin-HotkeyCombat 'configured'
         Step-Hotkey 'r_slower' 0x52 50 -1; Step-Hotkey 'ctrl_t_faster' 0x54 100 1 0x11
-        $script:hk.phase='persist_restart'; Save-HotkeySession 1 $true
+        $script:hk.phase='persist_restart'; Save-HotkeySession 2 $true
         # Declared AddOn SavedVariables use the per-addon account file. The
         # separate flat saved-variables.lua belongs to FrameXML state.
         $savedPath=Join-Path $state 'saved\AZSSpeedGear.lua'
         $saved=if (Test-Path -LiteralPath $savedPath -PathType Leaf) { [IO.File]::ReadAllText($savedPath) } else { '' }
         Assert-Hotkey 'saved_custom_keys' ($saved -match 'hotkeyDown[^\r\n]{0,30}"R"' -and $saved -match 'hotkeyUp[^\r\n]{0,30}"CTRL-T"') $true
-        $script:hk.phase='restart_custom_keys'; Start-HotkeySession 2
+        $script:hk.phase='restart_custom_keys_ready'; Start-HotkeySession 3 -ReadyOnly
         Assert-Hotkey 'reloaded_custom_bindings' ($script:hk.current.down -ceq 'R' -and $script:hk.current.up -ceq 'CTRL-T' -and $script:hk.current.r -ceq 'AZSG_SLOWER' -and $script:hk.current.ctrlT -ceq 'AZSG_FASTER') $script:hk.current
-        Step-Hotkey 'reloaded_r_slower' 0x52 50 -1; Step-Hotkey 'reloaded_ctrl_t_faster' 0x54 100 1 0x11
         Click-Hotkey 'launcher'; Wait-Hotkey 'reloaded_panel_opened' { $script:hk.current.panel -eq 1 }; Capture-Hotkey 2
-        Save-HotkeySession 2 $true
+        Click-Hotkey 'closeButton'; Wait-Hotkey 'reloaded_panel_hidden' { $script:hk.current.panel -eq 0 }
+        Begin-HotkeyCombat 'reloaded'
+        Step-Hotkey 'reloaded_r_slower' 0x52 50 -1; Step-Hotkey 'reloaded_ctrl_t_faster' 0x54 100 1 0x11
+        Save-HotkeySession 3 $true
         $script:hk.status='passed'; $script:hk.reason='physical_default_and_rebound_keys_native_delivery_and_restart_persistence_observed'
     } catch {
         $message=[string]$_.Exception.Message
