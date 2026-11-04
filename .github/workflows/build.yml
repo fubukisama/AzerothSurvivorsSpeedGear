@@ -43,6 +43,11 @@ jobs:
           if ((Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne '2265a223d9e2f01f82f45290d885b884e4dbe8026352f2815956608f837f0cb3') { throw 'Meter source identity mismatch' }
           Add-Content $env:GITHUB_ENV "AZSG_METER_ORIGINAL=$path"
           Add-Content $env:GITHUB_ENV "AZSG_METER_SOURCE=$($path.Replace('.lua','-repaired.lua'))"
+      - name: Stage pinned Keijin damage-only fixture
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP 'Keijin-DamageText.lua'
+          ./tools/StageKeijinFixture.ps1 -OutputPath $path | Out-Null
+          Add-Content $env:GITHUB_ENV "AZSG_KEIJIN_SOURCE=$path"
       - name: Configure
         run: cmake -S . -B build -A x64 "-DLUA50_ROOT=$env:LUA50_ROOT"
       - name: Build
