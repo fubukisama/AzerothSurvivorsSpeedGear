@@ -1,0 +1,171 @@
+{
+  "schema": 1,
+  "product": "AzerothSurvivorsSpeedGear",
+  "status": "observed",
+  "reason": "bounded_observations_five_minute_target_not_reached",
+  "lagResolutionEstablished": false,
+  "provenance": {
+    "workflowRepository": "fubukisama/AzerothSurvivorsTestAssets",
+    "ciRunId": "41852851808",
+    "sourceCommit": "40f48e08147521dbd3cfea68a755cc64e01f0d97",
+    "checkedUtc": "2026-11-04T14:59:18.8345768Z",
+    "privateRawReportSHA256": "2300a4b0c797e935236fe853f7daa654669b38548901c9c02871b19b9f58d2a4",
+    "privateRawReportBytes": 1268591,
+    "rawStatus": "passed",
+    "rawReason": "bounded_current_client_observations",
+    "gameSource": "private_cached_base_plus_verified_delta",
+    "cachedBaseSHA256": "6c1e064ffe80b5b43b2374326667ac959e2408ff885da9050ffc88091a873667",
+    "cachedBaseBytes": 936145410,
+    "deltaSHA256": "c8a9262b7c18330b8b8385c5a503f9cffed873443b59550445401feff19d51ec",
+    "deltaBytes": 90685447
+  },
+  "executable": {
+    "reportedVersion": null,
+    "bytes": 151493632,
+    "sha256": "6ca5f4ba4eb6b26716e4b7d9e03cbd25ddafe7582dcd8e55333e070a28058afa"
+  },
+  "environment": {
+    "runtimeProfile": "updated_warp",
+    "renderer": "DX12 software fallback / Microsoft Basic Render Driver",
+    "viewport": "640x480",
+    "logicalProcessors": 2,
+    "physicalMemoryBytes": 8584425472,
+    "independentClock": "GetSystemTimePreciseAsFileTime in the unhooked parent process",
+    "reportedPluginVersion": "0.7.5",
+    "preparedDeliveryVersion": "0.7.6"
+  },
+  "variants": [
+    {
+      "variant": "all_current",
+      "addons": [
+        "AZSSpellMeter",
+        "KeijinUI",
+        "SurvivorsDragonUi"
+      ],
+      "avrtIncluded": false,
+      "syntheticSettings": true,
+      "status": "observed",
+      "reason": "combat_phase_ended",
+      "wallSeconds": 78.249,
+      "firstGameSeconds": 0.75,
+      "lastGameSeconds": 75.35,
+      "reachedFiveMinuteGameTime": false,
+      "guardObserved": true,
+      "acknowledgedAccelerationActions": 2,
+      "freshNativeThreeTimesSamples": 1,
+      "observedUIUpdatesPerWallSecond": 1.192,
+      "observedActiveDamageLabelPeak": 3,
+      "frameCountMinimum": 4584,
+      "frameCountMaximum": 4596,
+      "glyphObservations": 143,
+      "glyphResetMaximum": 0,
+      "glyphUsedTexelsMaximum": 81644,
+      "normalExitObserved": false,
+      "cleanupCloseWaitTimedOut": true
+    },
+    {
+      "variant": "all_repaired",
+      "addons": [
+        "AZSSpellMeter",
+        "KeijinUI",
+        "SurvivorsDragonUi"
+      ],
+      "avrtIncluded": false,
+      "syntheticSettings": true,
+      "status": "observed",
+      "reason": "combat_phase_ended",
+      "wallSeconds": 90.136,
+      "firstGameSeconds": 0.95,
+      "lastGameSeconds": 85.61,
+      "reachedFiveMinuteGameTime": false,
+      "guardObserved": true,
+      "acknowledgedAccelerationActions": 2,
+      "freshNativeThreeTimesSamples": 1,
+      "observedUIUpdatesPerWallSecond": 1.193,
+      "observedActiveDamageLabelPeak": 3,
+      "frameCountMinimum": 4584,
+      "frameCountMaximum": 4597,
+      "glyphObservations": 143,
+      "glyphResetMaximum": 0,
+      "glyphUsedTexelsMaximum": 78669,
+      "normalExitObserved": false,
+      "cleanupCloseWaitTimedOut": true
+    },
+    {
+      "variant": "speedgear_only",
+      "addons": [],
+      "avrtIncluded": false,
+      "syntheticSettings": true,
+      "status": "observed",
+      "reason": "combat_phase_ended",
+      "wallSeconds": 77.472,
+      "firstGameSeconds": 1.37,
+      "lastGameSeconds": 76.34,
+      "reachedFiveMinuteGameTime": false,
+      "guardObserved": true,
+      "acknowledgedAccelerationActions": 2,
+      "freshNativeThreeTimesSamples": 2,
+      "observedUIUpdatesPerWallSecond": 1.151,
+      "observedActiveDamageLabelPeak": 0,
+      "frameCountMinimum": 4260,
+      "frameCountMaximum": 4260,
+      "glyphObservations": 145,
+      "glyphResetMaximum": 0,
+      "glyphUsedTexelsMaximum": 100914,
+      "normalExitObserved": false,
+      "cleanupCloseWaitTimedOut": true
+    }
+  ],
+  "sourceRegression": {
+    "redRunId": "41848662929",
+    "fixedRunId": "41852402123",
+    "laterChecksRunId": "41860132725",
+    "laterCheckCount": 32,
+    "syntheticRows": [
+      8,
+      64,
+      256
+    ],
+    "sortsBeforePerCase": 150,
+    "comparisonsBefore": [
+      2850,
+      56550,
+      297300
+    ],
+    "sortedRowVisitsBefore": [
+      1200,
+      9600,
+      38400
+    ],
+    "sortsAfter": 0,
+    "comparisonsAfter": 0,
+    "sortedRowVisitsAfter": 0,
+    "dataGrowthChecksPassed": 14,
+    "originalSourceSHA256": "2265a223d9e2f01f82f45290d885b884e4dbe8026352f2815956608f837f0cb3",
+    "v1SourceSHA256": "a724462a9a14ce94017c0c2a4324416804e9be2369444aad422c386eba00d2a5",
+    "v2SourceSHA256": "9a2273e6d75998ae2a3fa75904212667d40952cf920728a56fd49b0483793aa6"
+  },
+  "limitations": [
+    "Cases ended after 75-86 game seconds before the reported five-minute point.",
+    "The frame guard restored 1x in every case; sustained 3x performance was not established.",
+    "Software-renderer UI update rates are not matched desktop GPU FPS.",
+    "avrt.dll was omitted to prevent pinned addon startup updates; the full installed native-mod combination was not isolated.",
+    "Settings were synthetic and observer frame walks add overhead.",
+    "No glyph reset was observed; a peak of three active damage labels does not exercise dense long-session load or rule out later growth.",
+    "All final normal-close waits exceeded thirty seconds after numerical observations.",
+    "Synthetic source regression counts demonstrate deferred presentation work, not whole-game lag resolution."
+  ],
+  "optionalLocalCollector": {
+    "automaticCollection": false,
+    "explicitSessionLocalExceptionRequired": true,
+    "sampleHz": 1,
+    "fields": [
+      "process CPU",
+      "process RAM",
+      "available GPU counters"
+    ],
+    "operatesGame": false,
+    "changesSettings": false
+  },
+  "scope": "Short curated numerical summary only. The full private raw report, game files and personal configurations are not published. No sole-cause or lag-resolution verdict."
+}

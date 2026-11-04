@@ -7,13 +7,19 @@ on:
     paths-ignore: ['compatibility/**']
   pull_request:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: Windows image (alternate pool for a delayed hosted queue)
+        type: choice
+        options: [windows-2022, windows-2025]
+        default: windows-2022
 
 permissions:
   contents: read
 
 jobs:
   build:
-    runs-on: windows-2022
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.runner || 'windows-2022' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +57,16 @@ jobs:
           if (-not $repair.Changed) { throw 'First repair did not apply' }
           $again = ./scripts/RepairSpellMeter.ps1 -SourcePath $env:AZSG_METER_SOURCE
           if ($again.Changed) { throw 'Repair is not idempotent' }
+          $v1Script = Join-Path $env:RUNNER_TEMP 'RepairSpellMeter-v1.ps1'
+          Invoke-WebRequest 'https://raw.githubusercontent.com/fubukisama/AzerothSurvivorsSpeedGear/d4476d7a263710f482c3a99e75727b4d5690eb71/scripts/RepairSpellMeter.ps1' -OutFile $v1Script
+          if ((Get-FileHash $v1Script).Hash.ToLowerInvariant() -cne '825ee84a2160ee1a8a98dfb0dd73bbb2926f41152e4d9641c597c7d186e69d1d') { throw 'Historical repair identity mismatch' }
+          $upgrade = Join-Path $env:RUNNER_TEMP 'meter-upgrade.lua'
+          Copy-Item $env:AZSG_METER_ORIGINAL $upgrade
+          & $v1Script -SourcePath $upgrade | Out-Null
+          $v2 = ./scripts/RepairSpellMeter.ps1 -SourcePath $upgrade
+          if ($v2.OriginalSHA256 -cne 'a724462a9a14ce94017c0c2a4324416804e9be2369444aad422c386eba00d2a5' -or (Get-FileHash $upgrade).Hash -cne (Get-FileHash $env:AZSG_METER_SOURCE).Hash) { throw 'Repair upgrade differs from clean repair' }
+          if ((Get-FileHash (Join-Path $v2.BackupDirectory 'AZSSpellMeter.lua')).Hash.ToLowerInvariant() -cne $v2.OriginalSHA256) { throw 'Upgrade backup differs from input' }
+          foreach ($file in @('tools/remote_lag_overlay.ps1','tools/remote_lag_observe.ps1','tools/remote_launcher_acceptance.ps1','tools/remote_game_acceptance.ps1','tools/StageGameDelta.ps1')) { [void][scriptblock]::Create([IO.File]::ReadAllText((Join-Path $PWD $file))) }
           $unknown = Join-Path $env:RUNNER_TEMP 'unknown-meter.lua'
           [IO.File]::WriteAllText($unknown, '-- unsupported source')
           $before = (Get-FileHash $unknown).Hash
@@ -105,7 +121,7 @@ jobs:
           $legacy = Join-Path $env:RUNNER_TEMP 'PS51Meter.lua'
           Copy-Item -LiteralPath $env:AZSG_METER_ORIGINAL -Destination $legacy
           $repair = ./scripts/RepairSpellMeter.ps1 -SourcePath $legacy
-          if (-not $repair.Changed -or $repair.SHA256 -cne 'a724462a9a14ce94017c0c2a4324416804e9be2369444aad422c386eba00d2a5') { throw 'Windows PowerShell repair failed' }
+          if (-not $repair.Changed -or $repair.SHA256 -cne '9a2273e6d75998ae2a3fa75904212667d40952cf920728a56fd49b0483793aa6') { throw 'Windows PowerShell repair failed' }
       - name: Package
         run: ./scripts/Package.ps1
       - uses: actions/upload-artifact@v4
@@ -117,6 +133,9 @@ jobs:
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
+    concurrency:
+      group: stable-package-${{ github.ref }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write

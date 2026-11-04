@@ -1,5 +1,17 @@
 # AzerothSurvivorsSpeedGear
 
+Version 0.7.6 also defers minimized-meter presentation merging, sorting and
+ranking until a window is visible. Native totals and per-spell history still
+update. The guarded repair upgrades either original 1.32 or the 0.7.5 repair;
+both produce the same verified output and preserve a backup of the input.
+
+The optional `Native/AZSSpeedGearPerformance.exe` records numeric CPU, memory,
+available GPU counters and existing native status for one running game process.
+It is never started by the plugin or installer. Use only with explicit consent
+for local diagnostics; tests remain remote by default. It sends no input,
+starts no game and writes no game files. Its new report must be outside the game
+folder. Unsupported counters are recorded as unavailable, rather than zero.
+
 Version 0.7.5 includes a guarded repair for the installed AZSSpellMeter 1.32
 performance issue: minimized windows stop rewriting hidden rows, and death
 events leave redraws to the existing periodic updater. Statistics collection,
@@ -7,7 +19,7 @@ bubble totals and visible windows keep updating. Exit the game, then run
 `scripts/RepairSpellMeter.ps1 -GamePath <AzerothSurvivors.exe>` from the package.
 It verifies the exact source identity and saves a reversible backup. Other
 SpellMeter versions are left untouched. This fixes reproduced addon overhead;
-it does not certify the complete 0.140.0 combat slowdown. See
+it does not establish resolution of the reported later-run combat slowdown. See
 [the investigation](docs/PERFORMANCE.md). Native speed and protection algorithms
 are unchanged.
 
