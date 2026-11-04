@@ -89,6 +89,36 @@ through concurrent speed changes before it can be accepted.
 
 ## Remote comparison
 
+### Accepted repair and rejected clock experiment
+
+Remote run [41823387079](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41823387079)
+passed the repaired-meter regression, including live totals, detached healing
+windows and immediate kill credit. Hidden main-window mutations were zero in
+all three periodic phases; the 1,000-death burst performed zero hidden writes
+and zero immediate full-window refreshes. Normal data rebuild and rate-history
+sampling remain active. The existing periodic updater handles repaint.
+
+The same run compared a candidate concurrent QPC reader with the stable backend
+using the same host and 16,777,216 queries per sample. Benefits were inconsistent:
+8-thread restored-1x wall time was 916.63ms for stable versus 932.93ms for the
+candidate; single-thread loaded-1x was 767.35ms versus 803.92ms. Some other samples
+improved slightly. The candidate was removed before release. The retained
+[stable](evidence/clock-before20261104.json) and
+[experimental](evidence/clock-experiment20261104.json) reports describe that
+experiment, not shipped code or game FPS. Version 0.7.5 retains the 0.7.4 clock
+and frame-guard algorithms.
+
+`scripts/RepairSpellMeter.ps1` repairs only the installed 1.32 source SHA-256
+`2265a223d9e2f01f82f45290d885b884e4dbe8026352f2815956608f837f0cb3`.
+It backs up original bytes and verifies output SHA-256
+`a724462a9a14ce94017c0c2a4324416804e9be2369444aad422c386eba00d2a5`.
+Other versions or modified sources are refused; repeat application is a no-op.
+
+The 0.140.0 five-minute combat slowdown has not been reproduced in a matched
+current-client run. These results fix an active addon overhead, but do not prove
+a sole cause or eliminate game/rendering workload as another contributor. A 5x
+guard activation remains a frame-gap observation, not a component diagnosis.
+
 Keep the map, character/build, graphics settings, language and addon settings
 matched where possible. Record the actual game progress, event rate and visible
 enemy/effect load. Report any differences that prevent a matched comparison.

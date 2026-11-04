@@ -1,5 +1,16 @@
 # AzerothSurvivorsSpeedGear
 
+Version 0.7.5 includes a guarded repair for the installed AZSSpellMeter 1.32
+performance issue: minimized windows stop rewriting hidden rows, and death
+events leave redraws to the existing periodic updater. Statistics collection,
+bubble totals and visible windows keep updating. Exit the game, then run
+`scripts/RepairSpellMeter.ps1 -GamePath <AzerothSurvivors.exe>` from the package.
+It verifies the exact source identity and saves a reversible backup. Other
+SpellMeter versions are left untouched. This fixes reproduced addon overhead;
+it does not certify the complete 0.140.0 combat slowdown. See
+[the investigation](docs/PERFORMANCE.md). Native speed and protection algorithms
+are unchanged.
+
 Version 0.7.4 replaces the oversized panel with a compact layout. Buttons fit
 their localized text with consistent padding and reflow for long key chords.
 Diagnostics expand on demand; the restore button has a normal caption-sized

@@ -13,7 +13,6 @@
 #include <algorithm>
 #include "pe_image.h"
 #include "speed_clock.h"
-#include "qpc_snapshot.h"
 #include "command.h"
 #include "command_gate.h"
 #include "console_bridge.h"
@@ -35,7 +34,6 @@ TimeFn realTime=nullptr;
 SleepFn realSleep=nullptr;
 std::mutex clockMutex;
 azsg::VirtualClock qpcClock,tickClock,timeClock;
-azsg::QpcSnapshot qpcSnapshot;
 azsg::WrappingCounter32 multimediaCounter;
 std::atomic<unsigned> speed{100};
 std::atomic<std::uint64_t> simulationCalls{0};
@@ -77,27 +75,20 @@ void setSpeed(unsigned next,const char* why) {
     {
         std::lock_guard<std::mutex> guard(clockMutex);
         if(speed.load(std::memory_order_relaxed)==next) return;
-        qpcSnapshot.begin_update();
         LARGE_INTEGER qpc{};realQpc(&qpc);
-        const auto transition=(std::max)(static_cast<std::uint64_t>(qpc.QuadPart),qpcSnapshot.observed_real());
-        qpcClock.set_speed(transition,next);
+        qpcClock.set_speed(static_cast<std::uint64_t>(qpc.QuadPart),next);
         auto ticks=realTick64();tickClock.set_speed(ticks,next);
         // Keep multimedia timer resolution; GetTickCount64 can quantize to 16ms.
         timeClock.set_speed(multimediaCounter.sample(realTime()),next);
         speed.store(next,std::memory_order_release);
-        qpcSnapshot.publish(qpcClock);
     }
     log("speed100="+std::to_string(next)+" reason="+why+" simulation_calls="+std::to_string(simulationCalls.load()));
 }
 BOOL WINAPI hookedQpc(LARGE_INTEGER* out) {
     if(!out) return realQpc(out);
-    std::uint64_t value=0;
-    const bool sampled=qpcSnapshot.read([&](std::uint64_t& actual) noexcept {
-        LARGE_INTEGER counter{};if(!realQpc(&counter)) return false;
-        actual=static_cast<std::uint64_t>(counter.QuadPart);return true;
-    },value);
-    if(!sampled) return FALSE;
-    out->QuadPart=static_cast<LONGLONG>(value);return TRUE;
+    std::lock_guard<std::mutex> guard(clockMutex);
+    LARGE_INTEGER actual{};if(!realQpc(&actual)) return FALSE;
+    out->QuadPart=static_cast<LONGLONG>(qpcClock.sample(static_cast<std::uint64_t>(actual.QuadPart)));return TRUE;
 }
 DWORD WINAPI hookedTick() {
     std::lock_guard<std::mutex> guard(clockMutex);
@@ -212,13 +203,11 @@ DWORD WINAPI worker(void*) {
         create(winmm,"timeGetTime",reinterpret_cast<void*>(hookedTime),reinterpret_cast<void**>(&realTime)) &&
         MH_CreateHook(reinterpret_cast<void*>(imageBase+site.sleep_rva),reinterpret_cast<void*>(hookedRustSleep),reinterpret_cast<void**>(&realSleep))==MH_OK;
     if(ok) {
+        LARGE_INTEGER qpc{};realQpc(&qpc);qpcClock.sample(qpc.QuadPart);
+        auto ticks=realTick64();tickClock.sample(ticks);
         {
             std::lock_guard<std::mutex> guard(clockMutex);
-            qpcSnapshot.begin_update();
-            LARGE_INTEGER qpc{};realQpc(&qpc);qpcClock.sample(qpc.QuadPart);
-            auto ticks=realTick64();tickClock.sample(ticks);
             timeClock.sample(multimediaCounter.sample(realTime()));
-            qpcSnapshot.publish(qpcClock);
         }
         ok=MH_EnableHook(MH_ALL_HOOKS)==MH_OK;
     }

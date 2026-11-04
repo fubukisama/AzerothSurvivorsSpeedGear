@@ -1,0 +1,130 @@
+{
+  "schema": 1,
+  "status": "observed",
+  "reason": "fixed_work_clock_observations_recorded",
+  "sourceCommit": "a7e1856ff211beaccd57885ee8f7d0918b63ff69",
+  "scope": "Synthetic fixed-work timing API throughput using the actual production DLL. Wall and process CPU time use unhooked OS FILETIME. Performance values are observations, not pass thresholds or a real-game root-cause verdict.",
+  "dllSHA256": "1591e5a5756ea6c1d523092abe3c9b783a446cda5a2b61883653bd90b9b4dc4e",
+  "runs": [
+    {
+      "stage": "baseline",
+      "threads": 1,
+      "calls": 16777216,
+      "wallMs": 488.634,
+      "processCpuMs": 484.375,
+      "observedQpcRate": 0.9999848634,
+      "backwards": 0,
+      "apiFailures": 0
+    },
+    {
+      "stage": "baseline",
+      "threads": 2,
+      "calls": 16777216,
+      "wallMs": 245.9815,
+      "processCpuMs": 468.75,
+      "observedQpcRate": 0.999992063,
+      "backwards": 0,
+      "apiFailures": 0
+    },
+    {
+      "stage": "baseline",
+      "threads": 8,
+      "calls": 16777216,
+      "wallMs": 125.2495,
+      "processCpuMs": 468.75,
+      "observedQpcRate": 0.9999926703,
+      "backwards": 0,
+      "apiFailures": 0
+    },
+    {
+      "stage": "hooked1",
+      "threads": 1,
+      "calls": 16777216,
+      "wallMs": 767.3501,
+      "processCpuMs": 765.625,
+      "observedQpcRate": 0.9999832492,
+      "backwards": 0,
+      "apiFailures": 0
+    },
+    {
+      "stage": "hooked1",
+      "threads": 2,
+      "calls": 16777216,
+      "wallMs": 1058.7193,
+      "processCpuMs": 1765.625,
+      "observedQpcRate": 0.9999850325,
+      "backwards": 0,
+      "apiFailures": 0
+    },
+    {
+      "stage": "hooked1",
+      "threads": 8,
+      "calls": 16777216,
+      "wallMs": 1019.5935,
+      "processCpuMs": 3843.75,
+      "observedQpcRate": 0.9999933898,
+      "backwards": 0,
+      "apiFailures": 0
+    },
+    {
+      "stage": "hooked2",
+      "threads": 1,
+      "calls": 16777216,
+      "wallMs": 764.9977,
+      "processCpuMs": 750,
+      "observedQpcRate": 2.000038285,
+      "backwards": 0,
+      "apiFailures": 0
+    },
+    {
+      "stage": "hooked2",
+      "threads": 2,
+      "calls": 16777216,
+      "wallMs": 1092.017,
+      "processCpuMs": 1812.5,
+      "observedQpcRate": 2.000031871,
+      "backwards": 0,
+      "apiFailures": 0
+    },
+    {
+      "stage": "hooked2",
+      "threads": 8,
+      "calls": 16777216,
+      "wallMs": 941.2692,
+      "processCpuMs": 3484.375,
+      "observedQpcRate": 2.000038776,
+      "backwards": 0,
+      "apiFailures": 0
+    },
+    {
+      "stage": "restored1",
+      "threads": 1,
+      "calls": 16777216,
+      "wallMs": 767.9766,
+      "processCpuMs": 750,
+      "observedQpcRate": 1.000003821,
+      "backwards": 0,
+      "apiFailures": 0
+    },
+    {
+      "stage": "restored1",
+      "threads": 2,
+      "calls": 16777216,
+      "wallMs": 1129.0442,
+      "processCpuMs": 2171.875,
+      "observedQpcRate": 1.000015093,
+      "backwards": 0,
+      "apiFailures": 0
+    },
+    {
+      "stage": "restored1",
+      "threads": 8,
+      "calls": 16777216,
+      "wallMs": 916.6341,
+      "processCpuMs": 3562.5,
+      "observedQpcRate": 1.00001131,
+      "backwards": 0,
+      "apiFailures": 0
+    }
+  ]
+}
