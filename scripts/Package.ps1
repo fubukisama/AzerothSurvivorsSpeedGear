@@ -2,7 +2,7 @@
 param([string]$Configuration = 'Release')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$version = '0.7.5'
+$version = '0.7.6'
 $package = Join-Path $root ('dist\AZSSpeedGear-' + $version + '-Windows-x64')
 if (Test-Path -LiteralPath $package) { throw 'Package folder already exists; use a new clean output directory.' }
 foreach ($directory in @('AddOns','Native','scripts','docs','licenses')) {
@@ -29,6 +29,7 @@ finally { $algorithm.Dispose() }
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $updater 'Scanner.json') -Encoding UTF8
 Copy-Item -LiteralPath (Join-Path $root "build\$Configuration\dwmapi.dll") -Destination (Join-Path $package 'Native\dwmapi.dll')
 Copy-Item -LiteralPath (Join-Path $root "build\$Configuration\AZSSpeedGearProbe.exe") -Destination (Join-Path $package 'Native\AZSSpeedGearProbe.exe')
+Copy-Item -LiteralPath (Join-Path $root "build\$Configuration\AZSSpeedGearPerformance.exe") -Destination (Join-Path $package 'Native\AZSSpeedGearPerformance.exe')
 foreach ($file in @('Install.ps1','Uninstall.ps1','Status.ps1','Update.ps1','Start.ps1','NativeUpdate.ps1','TocNotes.ps1')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $package "scripts\$file") }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RepairSpellMeter.ps1') -Destination (Join-Path $package 'scripts\RepairSpellMeter.ps1')
 Copy-Item -LiteralPath (Join-Path $root 'docs\PERFORMANCE.md') -Destination (Join-Path $package 'docs\PERFORMANCE.md')
