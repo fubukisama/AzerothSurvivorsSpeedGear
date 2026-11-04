@@ -133,6 +133,9 @@ jobs:
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
+    concurrency:
+      group: stable-package-${{ github.ref }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write
