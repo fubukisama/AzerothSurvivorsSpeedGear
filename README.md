@@ -19,7 +19,7 @@ bubble totals and visible windows keep updating. Exit the game, then run
 `scripts/RepairSpellMeter.ps1 -GamePath <AzerothSurvivors.exe>` from the package.
 It verifies the exact source identity and saves a reversible backup. Other
 SpellMeter versions are left untouched. This fixes reproduced addon overhead;
-it does not certify the complete 0.140.0 combat slowdown. See
+it does not establish resolution of the reported later-run combat slowdown. See
 [the investigation](docs/PERFORMANCE.md). Native speed and protection algorithms
 are unchanged.
 

@@ -23,7 +23,7 @@ try{
     if($data.schema -ne 1 -or $data.sampleCount -lt 3 -or $data.sampleCount -gt 6 -or $data.status -cne 'observed'){throw 'Insufficient fixture observations'}
     if($data.gameLaunched -ne $false -or $data.inputInjected -ne $false -or $data.memoryContentsRead -ne $false){throw 'Passive-scope flags invalid'}
     foreach($row in $data.samples){
-        if($row.fileTime -le 0 -or $null -eq $row.privateBytes -or $row.privateBytes -lt 0 -or $null -eq $row.workingSetBytes -or $row.workingSetBytes -lt 0 -or $row.processCpuMs -lt 0){throw 'Invalid OS resource sample'}
+        if($row.fileTime -le 0 -or $row.cpuStatus -cne 'available' -or $null -eq $row.processCpuMs -or $row.processCpuMs -lt 0 -or $row.memoryStatus -cne 'available' -or $null -eq $row.privateBytes -or $row.privateBytes -lt 0 -or $null -eq $row.workingSetBytes -or $row.workingSetBytes -lt 0){throw 'Invalid OS resource sample'}
         if($row.native.speed100 -ne 300 -or $row.native.backend -cne 'ready'){throw 'Whitelisted native status was not read'}
         foreach($key in @('gpu3dMaxPercent','gpuDedicatedMaxBytes','gpuSharedMaxBytes')){
             $metric=$row.$key

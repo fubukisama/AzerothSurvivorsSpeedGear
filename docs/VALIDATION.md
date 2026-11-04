@@ -1,4 +1,41 @@
-# Validation — updated 2026-11-04
+# Validation — updated 2026-11-05
+
+## Version 0.7.6 hidden presentation work and current runtime limits
+
+The 0.7.5 repair removed hidden widget painting, but still ran the full row
+rebuild. Remote [run 41848662929](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41848662929)
+reproduced 150 hidden sorts with synthetic 8/64/256-row inputs, producing
+2,850/56,550/297,300 comparator calls. The v2 data-only path preserves totals
+and rate-history sampling while skipping presentation work for the hidden main
+window. [Run 41852402123](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41852402123)
+passed all fourteen growth checks with zero hidden sorting/comparisons, and
+retained visible ranks and fresh per-spell history. Subsequent
+[run 41860132725](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41860132725)
+passed 32 checks, including passive-collector checks. These source-closure
+operation counts are not game FPS measurements.
+
+Private runtime `41852851808`, source `40f48e0`, tested current addons, repaired
+addons and SpeedGear alone using the newly supplied EXE SHA-256
+`6ca5f4ba4eb6b26716e4b7d9e03cbd25ddafe7582dcd8e55333e070a28058afa`
+(151493632 bytes; no reported version string). The older 0.140.0 EXE identity
+`27c8df...` is historical and does not identify this newer executable. The
+[curated numerical summary](evidence/remaininglag20261105.json) pins the private
+raw report SHA-256 `2300a4b0c797e935236fe853f7daa654669b38548901c9c02871b19b9f58d2a4`
+and base/delta identities without publishing game assets or personal settings.
+
+All cases yielded bounded observations, not a resolution verdict. At roughly
+1.2 UI Hz on the software renderer, every case triggered the guard and restored
+1x; combat ended after 75-86 game seconds, before the five-minute target. The
+sampled glyph resets were zero, and no damage-label growth beyond a peak of
+three was observed. This light, short run cannot exclude later high-load
+behavior. `avrt.dll` was omitted to prevent startup addon updates, fresh settings
+were synthetic, and all three final-close waits retained their timeout warning.
+It is not acceptance of the complete installed native-mod combination, a
+matched desktop performance comparison, or proof that the user's lag is fixed.
+
+The optional passive CPU/RAM/GPU collector is manual and requires an explicit
+local exception before use. It defaults to no local collection, samples at 1Hz
+when authorized, and does not operate or configure the game.
 
 ## Version 0.7.5 minimized SpellMeter repair
 
