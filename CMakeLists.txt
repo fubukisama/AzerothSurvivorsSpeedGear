@@ -162,6 +162,8 @@ if(BUILD_TESTING)
     # This is a test-only interpreter. The native plugin remains optimized.
     target_compile_options(lua50 PRIVATE /Od)
     add_test(NAME Lua50Addon COMMAND lua50 tests/addon_test.lua)
+    add_test(NAME Lua50UiRefreshBudget COMMAND lua50 tests/ui_refresh_budget.lua)
+    set_tests_properties(Lua50UiRefreshBudget PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" LABELS "remote;performance")
     if(DEFINED ENV{AZSG_KEIJIN_SOURCE})
       add_test(NAME Lua50KeijinWidthCache COMMAND lua50 tests/keijin_width_cache.lua "$ENV{AZSG_KEIJIN_SOURCE}")
       set_tests_properties(Lua50KeijinWidthCache PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" LABELS "remote;performance")

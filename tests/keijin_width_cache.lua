@@ -7,7 +7,7 @@ local frames, checks, failures = {}, 0, {};
 local widthCalls, textReads, fontReads, fontWrites = 0, 0, 0, 0;
 local db = {combatTextMode="scroll",combatTextPosition="fixed",combatTextIcons=false};
 local function nativeWidth(fs)
-    return string.len(fs.text)*fs.fontSize*(fs.font=="AlternateFont" and .75 or .6);
+    return string.len(fs.text)*fs.fontSize*(fs.font=="AlternateFont" and .75 or .6)*(UIParent and UIParent.scale or 1);
 end
 local function widget(name)
     local self={name=name,scripts={},text="",font="FixtureFont",fontSize=12,width=200,height=120,left=300,bottom=200,scale=1,shown=true};
@@ -91,6 +91,7 @@ local function spawn(amount,crit,spell)
     K.damageText.Spawn(amount,crit,"Target","Fire",false,spell or "FixtureSpell");return one();
 end
 
+check(K.damageText.azsgPerformanceRevision==1,"patched source advertises its compatible performance revision");
 local item=spawn(100,false);
 local initialHalf=item.halfWidth;
 local beforeWidth,beforeText,beforeFont=widthCalls,textReads,fontReads;
@@ -127,6 +128,11 @@ check(widthCalls==beforeWidth+1,"font face change invalidates once");
 check(afterFace>beforeFace,"a different native font width changes the collision footprint");
 stop();K.damageText.SetTextSize(1);item=spawn(7,false);
 check(item.fs.text=="7" and close(item.halfWidth,nativeWidth(item.fs)/2+4),"pooled font string does not reuse the previous item's width");
+local beforeUiScale=item.halfWidth;beforeWidth=widthCalls;UIParent.scale=1.25;tick(1,.001);
+check(widthCalls==beforeWidth+1 and item.halfWidth>beforeUiScale,"global UI-scale change remeasures and updates collision geometry");
+beforeWidth=widthCalls;tick(10,.001);
+check(widthCalls==beforeWidth,"unchanged UI-scale frames return to cached geometry");
+UIParent.scale=1;tick(1,.001);
 
 local function invalidate() SetSize(item,item.size+1); end
 item.fs.widthOverride=0;invalidate();beforeWidth=widthCalls;
