@@ -26,7 +26,7 @@ extern "C" __declspec(noinline) void FakeRustSleep(std::uint64_t seconds,std::ui
 }
 
 namespace {
-constexpr std::uint64_t calls_per_sample=1048576;
+constexpr std::uint64_t calls_per_sample=16777216;
 std::uint64_t ticks(const FILETIME& value) {
     return (std::uint64_t(value.dwHighDateTime)<<32)|value.dwLowDateTime;
 }

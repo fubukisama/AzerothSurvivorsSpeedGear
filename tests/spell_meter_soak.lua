@@ -71,6 +71,7 @@ main.bubbleText = widget("bubbleText", "bubble");
 local rows = {};
 for index = 1, 25 do rows[index] = widget("row" .. index, "main"); end
 main.rows = rows;
+upvalue(onMainUpdate, "rows", rows, true);
 local bubble = widget("bubble", "bubble"); bubble.parked = true; bubble.moving = false;
 upvalue(refresh, "frame", main, true);
 upvalue(onBubbleUpdate, "bubble", bubble, true);

@@ -62,11 +62,23 @@ jobs:
       - name: Record independent native clock throughput
         if: ${{ !cancelled() }}
         run: ./tools/remote_clock_contention.ps1 -HostPath build/Release/clock_contention_test.exe -DllPath build/Release/dwmapi.dll -OutputPath acceptance/clock-contention.json
+      - name: Compare the same host with the previous stable backend
+        if: ${{ !cancelled() }}
+        run: |
+          $before = Join-Path $env:RUNNER_TEMP 'AZSGClockBefore'
+          git worktree add --detach $before 25f3c1c5fa289707196ef2a58d95834612a8661f
+          cmake -S $before -B "$before/build" -A x64 -DBUILD_TESTING=OFF
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot configure stable backend comparison' }
+          cmake --build "$before/build" --config Release --target AZSSpeedGear --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot build stable backend comparison' }
+          ./tools/remote_clock_contention.ps1 -HostPath build/Release/clock_contention_test.exe -DllPath "$before/build/Release/dwmapi.dll" -OutputPath acceptance/clock-before.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: LagDiagnostics
-          path: acceptance/clock-contention.json
+          path: |
+            acceptance/clock-contention.json
+            acceptance/clock-before.json
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: always()

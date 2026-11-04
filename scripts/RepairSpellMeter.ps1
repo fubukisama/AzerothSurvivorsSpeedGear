@@ -140,7 +140,7 @@ try {
     Write-NewFile $temporary $updatedBytes
     Assert-NoLinks $target
     if((Get-SHA256 ([IO.File]::ReadAllBytes($target))) -cne $originalSHA) { throw 'SpellMeter changed during repair; source replacement cancelled.' }
-    [IO.File]::Replace($temporary,$target,$null)
+    [IO.File]::Replace($temporary,$target,[NullString]::Value)
     if((Get-SHA256 ([IO.File]::ReadAllBytes($target))) -cne $repairedSHA) { throw 'Written repair identity could not be confirmed.' }
 } finally {
     if(Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
