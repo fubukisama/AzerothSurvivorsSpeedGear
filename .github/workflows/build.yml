@@ -35,11 +35,28 @@ jobs:
           $path = Join-Path $env:RUNNER_TEMP 'AZSSpellMeter-1.32.lua'
           Invoke-WebRequest 'https://raw.githubusercontent.com/kex0/AZSSpellMeter/c22ea820766046e7bd9b0ba7612c97a9ffac0c7a/AZSSpellMeter.lua' -OutFile $path
           if ((Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne '2265a223d9e2f01f82f45290d885b884e4dbe8026352f2815956608f837f0cb3') { throw 'Meter source identity mismatch' }
-          Add-Content $env:GITHUB_ENV "AZSG_METER_SOURCE=$path"
+          Add-Content $env:GITHUB_ENV "AZSG_METER_ORIGINAL=$path"
+          Add-Content $env:GITHUB_ENV "AZSG_METER_SOURCE=$($path.Replace('.lua','-repaired.lua'))"
       - name: Configure
         run: cmake -S . -B build -A x64 "-DLUA50_ROOT=$env:LUA50_ROOT"
       - name: Build
         run: cmake --build build --config Release --parallel 4
+      - name: Verify original failure and repair the disposable meter source
+        run: |
+          & ./build/Release/lua50.exe tests/spell_meter_soak.lua $env:AZSG_METER_ORIGINAL 2>&1 | Tee-Object -FilePath meter-original.txt
+          if ($LASTEXITCODE -eq 0) { throw 'Pinned original unexpectedly passed the performance regression' }
+          Copy-Item -LiteralPath $env:AZSG_METER_ORIGINAL -Destination $env:AZSG_METER_SOURCE
+          $repair = ./scripts/RepairSpellMeter.ps1 -SourcePath $env:AZSG_METER_SOURCE
+          if (-not $repair.Changed) { throw 'First repair did not apply' }
+          $again = ./scripts/RepairSpellMeter.ps1 -SourcePath $env:AZSG_METER_SOURCE
+          if ($again.Changed) { throw 'Repair is not idempotent' }
+          $unknown = Join-Path $env:RUNNER_TEMP 'unknown-meter.lua'
+          [IO.File]::WriteAllText($unknown, '-- unsupported source')
+          $before = (Get-FileHash $unknown).Hash
+          $rejected = $false
+          try { ./scripts/RepairSpellMeter.ps1 -SourcePath $unknown | Out-Null } catch { $rejected = $true }
+          if (-not $rejected -or (Get-FileHash $unknown).Hash -cne $before) { throw 'Unknown source protection failed' }
+          $global:LASTEXITCODE = 0
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
       - name: Record independent native clock throughput
