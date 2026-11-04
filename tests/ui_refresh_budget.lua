@@ -129,6 +129,7 @@ AZSSpeedGear_TEST = nil;
 dofile("AddOns/AZSSpeedGear/Localization.lua");
 dofile("AddOns/AZSSpeedGear/LocaleDetection.lua");
 dofile("AddOns/AZSSpeedGear/Hotkeys.lua");
+dofile("AddOns/AZSSpeedGear/Diagnostics.lua");
 dofile("AddOns/AZSSpeedGear/AZSSpeedGear.lua");
 
 local driver, controller = AZSSpeedGear.driver, AZSSpeedGear.controller;
@@ -269,6 +270,60 @@ check(GameTooltip:IsShown() and counters.measuredFormats >= 12 and counters.meas
     "visible tooltip numbers share the bounded refresh cadence while the panel stays hidden");
 check(counters.bodyWrites == 0, "hovering the launcher does not wake hidden panel body writes");
 invoke(AZSSpeedGear.launcher, "OnLeave");
+
+-- The optional controls use the same production panel and driver. They do not
+-- alter key handling, statistical events or the existing frame guard.
+check(not controller:DiagnosticsEnabled(), "diagnostic recording starts off");
+check(AZSSpeedGear.lightweightCombatText == false, "lightweight text starts off");
+show(); click("AZSSpeedGearDetails");
+check(frames.AZSSpeedGearLightText:IsShown() and frames.AZSSpeedGearDiagnostics:IsShown(),
+    "optional controls are reachable in Details");
+local beforeFlag = AZSSpeedGear.lightweightCombatText;
+KeijinUI = nil; click("AZSSpeedGearLightText");
+check(AZSSpeedGear.lightweightCombatText == beforeFlag, "missing Keijin cannot claim an active display mode");
+KeijinUI = {damageText={azsgPerformanceRevision=1}};
+click("AZSSpeedGearLightText");
+check(AZSSpeedGear.lightweightCombatText and AZSSpeedGearDB.lightweightCombatText,
+    "compatible lightweight mode persists an explicit opt-in");
+click("AZSSpeedGearLightText");
+check(not AZSSpeedGear.lightweightCombatText and AZSSpeedGearDB.lightweightCombatText == false,
+    "lightweight display can be restored without changing speed");
+click("AZSSpeedGearDiagnostics"); run(1, 60, 1);
+check(controller:DiagnosticsEnabled(), "diagnostics start only after clicking their control");
+local trace = controller:ExportDiagnostics();
+check(trace.frameCount > 0 and trace.nativeReceiptAvailable == false,
+    "diagnostic context is available without inventing native receipts");
+click("AZSSpeedGearKeepTrace");
+check(AZSSpeedGearDB.diagnosticTrace and AZSSpeedGearDB.diagnosticTrace.frameCount > 0,
+    "the snapshot button retains a bounded report in the addon's own save");
+trace.frames[1].phase = "untrusted";
+check(controller:ExportDiagnostics().frames[1].phase ~= "untrusted", "exported rows do not alias the recorder");
+SlashCmdList.AZSSPEEDGEAR("5");
+step(60, 0.251 * 60); step(60, 0.251 * 60); step(60, 0.251 * 60);
+check(controller.frameGuardTripped and controller.speed100 == 100,
+    "enabled diagnostics preserve the same third-frame restoration");
+run(1, 60, 1);
+local _, _, frozen = controller:DiagnosticCounts();
+check(frozen and AZSSpeedGearDB.diagnosticTrace.framesFrozen,
+    "the first protected window is automatically retained after its bounded post-window");
+click("AZSSpeedGearDiagnostics");
+check(not controller:DiagnosticsEnabled(), "the record control stops collection immediately");
+local languages = {"en","zh","ja","pl","cs","de","pt","es","fr","ro","tr","ru","uk","ko"};
+for _, code in ipairs(languages) do
+    AZSSpeedGearNativeLocale = code; AZSSpeedGearI18n.Refresh();
+    check(frames.AZSSpeedGearLightText.text == AZSSpeedGearI18n.Text("perf_lite_off"),
+        "lightweight caption follows game language: " .. code);
+    check(frames.AZSSpeedGearDiagnostics.text == AZSSpeedGearI18n.Text("diagnostics_off"),
+        "diagnostic caption follows game language: " .. code);
+    for _, control in ipairs({frames.AZSSpeedGearLightText,frames.AZSSpeedGearDiagnostics,frames.AZSSpeedGearKeepTrace}) do
+        check(control:GetWidth() <= AZSSpeedGear.panel:GetWidth() - 32,
+            "optional button width fits the panel: " .. code);
+    end
+end
+click("AZSSpeedGearDiagnostics"); hide(); run(0.2, 60, 1);
+fire("PLAYER_LEAVING_WORLD");
+check(not controller:DiagnosticsEnabled() and AZSSpeedGearDB.diagnosticTrace,
+    "leaving the world stops recording and retains the last report");
 
 string.format = realFormat;
 print("UI refresh budget checks passed: " .. checks);

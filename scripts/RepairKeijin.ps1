@@ -67,6 +67,7 @@ if($PSCmdlet.ParameterSetName -eq 'Source') {
 Assert-NoLinks $target
 Assert-NoLinks $backupBase
 if(-not (Test-Path -LiteralPath $target -PathType Leaf) -or [IO.Path]::GetExtension($target) -ine '.lua') { throw 'The selected KeijinUI source must be a regular Lua file.' }
+if((Get-Item -LiteralPath $target).Length -gt 256KB) { throw 'KeijinUI source exceeds the supported size; no source was changed.' }
 $originalBytes=[IO.File]::ReadAllBytes($target)
 $actualSHA=Get-SHA256 $originalBytes
 if($actualSHA -ceq $repairedSHA) {

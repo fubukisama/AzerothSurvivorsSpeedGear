@@ -1,5 +1,21 @@
 # AzerothSurvivorsSpeedGear
 
+Version 0.7.7 caches repeated Keijin floating-text width measurements and adds
+an optional light-text mode under **Details**. The separate guarded
+`scripts/RepairKeijin.ps1 -GamePath <AzerothSurvivors.exe>` supports only the
+verified 4.6.1 damage-only integration and backs up its source. Light text is off
+by default; it limits new labels to 24 and disables their size-pop animation.
+Statistics collection and the original display settings remain intact.
+
+Hidden speed panels skip body formatting. Visible numeric text has an eight
+updates-per-independent-wall-second budget, paced using recent callback counts;
+important state changes, input and the per-update guard remain immediate.
+An opt-in bounded diagnostic recorder preserves controller timings and explicit
+speed-change reasons; it starts off on each launch. See
+[diagnostic field meanings](docs/DIAGNOSTICS.md). The 250ms / three-update guard
+is unchanged. These reductions do not certify that the complete later-run lag
+or sustained 5x performance has been resolved.
+
 Version 0.7.6 also defers minimized-meter presentation merging, sorting and
 ranking until a window is visible. Native totals and per-spell history still
 update. The guarded repair upgrades either original 1.32 or the 0.7.5 repair;
