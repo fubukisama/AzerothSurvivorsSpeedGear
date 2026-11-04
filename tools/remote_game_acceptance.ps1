@@ -537,9 +537,18 @@ public sealed class AZSGRemoteGame : IDisposable {
     if(panic) Panicked=true;
     ObserveStartup(text,panic);
     if(Has(text,"loading screen:") || Has(text,"pipeline warm:")) ObserveLoading(text);
+    var glyph=System.Text.RegularExpressions.Regex.Match(text,@"\[glyph-cache\]\s+(\d+)/(\d+)\s+texels.*?\s(\d+)\s+chars shaped.*?\s(\d+)\s+cells rasterized.*?\s(\d+)\s+resets.*?\bdpi\s+([0-9.]+)");
+    if(glyph.Success && Rows.Count<8192) Rows.Enqueue(new AZSGRemoteRow {FileTime=Wall(),Payload="AZSGG1|"+string.Join("|",new[]{glyph.Groups[1].Value,glyph.Groups[2].Value,glyph.Groups[3].Value,glyph.Groups[4].Value,glyph.Groups[5].Value,glyph.Groups[6].Value})});
+    var handler=System.Text.RegularExpressions.Regex.Match(text,@"\[ui-handlers\]\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+(.{1,256})$");
+    if(handler.Success && Rows.Count<8192) {
+      var name=handler.Groups[4].Value;var bucket="Other";
+      if(Has(name,"Keijin")) bucket="Keijin";else if(Has(name,"AZSSpellMeter")) bucket="SpellMeter";else if(Has(name,"AZSSpeedGear")) bucket="SpeedGear";else if(Has(name,"DFRL")||Has(name,"SurvivorsDragon")) bucket="DragonUI";
+      Rows.Enqueue(new AZSGRemoteRow {FileTime=Wall(),Payload="AZSGH2|"+bucket+"|"+handler.Groups[1].Value+"|"+handler.Groups[2].Value+"|"+handler.Groups[3].Value});
+    }
     var at=text.IndexOf("AZSGT1|",StringComparison.Ordinal);
     if(at<0) at=text.IndexOf("AZSGH1|",StringComparison.Ordinal);
     if(at<0) at=text.IndexOf("AZSGL1|",StringComparison.Ordinal);
+    if(at<0) at=text.IndexOf("AZSGP1|",StringComparison.Ordinal);
     if(at<0 || text.Length-at>2048) return;
     if(Rows.Count>=8192) { System.Threading.Interlocked.Increment(ref Dropped); return; }
     Rows.Enqueue(new AZSGRemoteRow {FileTime=Wall(),Payload=text.Substring(at)});
@@ -1024,6 +1033,13 @@ try {
         $assets = Expand-OnlyOfficialAssets (Join-Path $fixtureRoot 'assets')
         $officialExe = Join-Path $fixtureRoot 'official-game.exe'
     }
+    if($env:AZSG_LAG_DIAGNOSTICS -ceq '1') {
+        . (Join-Path $PSScriptRoot 'remote_lag_overlay.ps1')
+        $identity=Apply-PrivateGameDelta -Identity $identity -FixtureRoot $fixtureRoot
+        $report.gameSource='private_cached_base_plus_verified_delta'
+        $report['privateDeltaSHA256']=$identity.deltaSHA256;$report['privateDeltaBytes']=$identity.deltaBytes
+        . (Join-Path $PSScriptRoot 'remote_lag_observe.ps1')
+    }
     $report.gameVersion = $identity.version; $report.gameSha256 = $identity.sha256
     $report.gameBytes = $identity.size; $report.officialAssetsSha256 = $identity.assetsSha256
     if ($env:AZSG_HOTKEY_ACCEPTANCE -ceq '1') {
@@ -1034,7 +1050,20 @@ try {
                 $report.acceptanceMode = 'stable_measured_confirmation'; $report.phase = 'confirmation';
             }
             . (Join-Path $PSScriptRoot 'remote_launcher_acceptance.ps1')
-            $hotkeys = Invoke-LauncherAcceptance -GameRoot (Join-Path $fixtureRoot 'launcher') -Assets $assets -OfficialExe $officialExe
+            if($env:AZSG_LAG_DIAGNOSTICS -ceq '1') {
+                $report.acceptanceMode='current_client_addon_observation';$report.phase='performance'
+                $runs=@()
+                foreach($variant in @('all_current','all_repaired','speedgear_only')) {
+                    $env:AZSG_LAG_VARIANT=$variant
+                    $runs+=Invoke-LauncherAcceptance -GameRoot (Join-Path $fixtureRoot $variant) -Assets $assets -OfficialExe $officialExe
+                    Move-LagFixtureState -GameRoot (Join-Path $fixtureRoot $variant)
+                }
+                $hotkeys=[pscustomobject]@{status='passed';reason='bounded_current_client_observations';criteria=@()}
+                if(@($runs | Where-Object status -ne 'passed').Count -gt 0){$hotkeys.status='blocked';$hotkeys.reason='partial_current_client_observations'}
+                $report['performance']=$runs
+            } else {
+                $hotkeys = Invoke-LauncherAcceptance -GameRoot (Join-Path $fixtureRoot 'launcher') -Assets $assets -OfficialExe $officialExe
+            }
             $report['launcher'] = $hotkeys
         } else {
         $report.acceptanceMode = 'physical_hotkeys';

@@ -8,7 +8,8 @@ param(
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $originalSHA='2265a223d9e2f01f82f45290d885b884e4dbe8026352f2815956608f837f0cb3'
-$repairedSHA='a724462a9a14ce94017c0c2a4324416804e9be2369444aad422c386eba00d2a5'
+$firstRepairSHA='a724462a9a14ce94017c0c2a4324416804e9be2369444aad422c386eba00d2a5'
+$repairedSHA='9a2273e6d75998ae2a3fa75904212667d40952cf920728a56fd49b0483793aa6'
 $sourceVersion='1.32'
 $utf8=New-Object Text.UTF8Encoding($false,$true)
 
@@ -88,10 +89,10 @@ if(-not (Test-Path -LiteralPath $target -PathType Leaf) -or [IO.Path]::GetExtens
 $originalBytes=[IO.File]::ReadAllBytes($target)
 $actualSHA=Get-SHA256 $originalBytes
 if($actualSHA -ceq $repairedSHA) {
-    [pscustomobject]@{Changed=$false;SourcePath=$target;SourceVersion=$sourceVersion;SHA256=$actualSHA;BackupDirectory=$null}
+    [pscustomobject]@{Changed=$false;SourcePath=$target;SourceVersion=$sourceVersion;RepairRevision=2;SHA256=$actualSHA;BackupDirectory=$null}
     return
 }
-if($actualSHA -cne $originalSHA) { throw "Unsupported SpellMeter source SHA256 $actualSHA; no source was changed." }
+if($actualSHA -cne $originalSHA -and $actualSHA -cne $firstRepairSHA) { throw "Unsupported SpellMeter source SHA256 $actualSHA; no source was changed." }
 $text=$utf8.GetString($originalBytes)
 $eol=if($text.Contains("`r`n")){"`r`n"}else{"`n"}
 $oldWindow=@(
@@ -119,10 +120,33 @@ $newDeath=@(
     "`t`tnoteKill(name)",
     "`t`t-- AZSSpeedGear performance repair: the existing periodic updater redraws the credited total."
 ) -join $eol
-foreach($anchor in @($oldWindow,$oldDeath)) {
-    if(([regex]::Matches($text,[regex]::Escape($anchor))).Count -ne 1) { throw 'Pinned source layout changed; no source was changed.' }
+$updated=$text
+if($actualSHA -ceq $originalSHA) {
+    foreach($anchor in @($oldWindow,$oldDeath)) {
+        if(([regex]::Matches($updated,[regex]::Escape($anchor))).Count -ne 1) { throw 'Pinned source layout changed; no source was changed.' }
+    }
+    $updated=$updated.Replace($oldWindow,$newWindow).Replace($oldDeath,$newDeath)
+    if((Get-SHA256 ($utf8.GetBytes($updated))) -cne $firstRepairSHA) { throw 'First-stage repair identity mismatch; no source was changed.' }
 }
-$updated=$text.Replace($oldWindow,$newWindow).Replace($oldDeath,$newDeath)
+$oldRebuild='local function rebuild(mode)'
+$newRebuild='local function rebuild(mode, dataOnly)'
+$oldSample=@(
+    "`tlocal windowRate = recentRate(mode, runNow(), meterTotal, bucket)",
+    "`tif windowRate then",
+    "`t`tmeterDps = windowRate",
+    "`tend"
+) -join $eol
+$newSample=@(
+    $oldSample,
+    "`t-- AZSSpeedGear performance repair v2: preserve history; defer hidden presentation work.",
+    "`tif dataOnly then return 0 end"
+) -join $eol
+$oldCall="`tlocal n = rebuild(win.fixed)"
+$newCall="`tlocal n = rebuild(win.fixed, win == frame and not frame:IsShown())"
+foreach($anchor in @($oldRebuild,$oldSample,$oldCall)) {
+    if(([regex]::Matches($updated,[regex]::Escape($anchor))).Count -ne 1) { throw 'Pinned data-path layout changed; no source was changed.' }
+}
+$updated=$updated.Replace($oldRebuild,$newRebuild).Replace($oldSample,$newSample).Replace($oldCall,$newCall)
 $updatedBytes=$utf8.GetBytes($updated)
 if((Get-SHA256 $updatedBytes) -cne $repairedSHA) { throw 'Repair output identity mismatch; no source was changed.' }
 
@@ -135,14 +159,14 @@ Assert-NoLinks $temporary
 New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
 $backup=Join-Path $backupRoot 'AZSSpellMeter.lua'
 Write-NewFile $backup $originalBytes
-if((Get-SHA256 ([IO.File]::ReadAllBytes($backup))) -cne $originalSHA) { throw 'Repair backup identity mismatch.' }
+if((Get-SHA256 ([IO.File]::ReadAllBytes($backup))) -cne $actualSHA) { throw 'Repair backup identity mismatch.' }
 try {
     Write-NewFile $temporary $updatedBytes
     Assert-NoLinks $target
-    if((Get-SHA256 ([IO.File]::ReadAllBytes($target))) -cne $originalSHA) { throw 'SpellMeter changed during repair; source replacement cancelled.' }
+    if((Get-SHA256 ([IO.File]::ReadAllBytes($target))) -cne $actualSHA) { throw 'SpellMeter changed during repair; source replacement cancelled.' }
     [IO.File]::Replace($temporary,$target,[NullString]::Value)
     if((Get-SHA256 ([IO.File]::ReadAllBytes($target))) -cne $repairedSHA) { throw 'Written repair identity could not be confirmed.' }
 } finally {
     if(Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
 }
-[pscustomobject]@{Changed=$true;SourcePath=$target;SourceVersion=$sourceVersion;OriginalSHA256=$originalSHA;SHA256=$repairedSHA;BackupDirectory=$backupRoot}
+[pscustomobject]@{Changed=$true;SourcePath=$target;SourceVersion=$sourceVersion;RepairRevision=2;OriginalSHA256=$actualSHA;SHA256=$repairedSHA;BackupDirectory=$backupRoot}

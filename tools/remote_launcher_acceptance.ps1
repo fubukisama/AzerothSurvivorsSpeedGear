@@ -7,6 +7,7 @@ function Invoke-LauncherAcceptance([string]$GameRoot, [string]$Assets, [string]$
         native=[Collections.Generic.List[object]]::new(); nativeLog=[Collections.Generic.List[object]]::new();
         nativeSeen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal); held=@{};
         confirmationMode=($env:AZSG_CONFIRMATION_ACCEPTANCE -ceq '1'); confirmationMetrics=$null;
+        lagMode=($env:AZSG_LAG_DIAGNOSTICS -ceq '1');lagRows=[Collections.Generic.List[object]]::new();lagMetrics=$null;nativeProfiles=[Collections.Generic.List[object]]::new();lagProfile=$null;
         nativeSnapshots=[Collections.Generic.List[object]]::new(); latestNative=$null; lastNativeSnapshot=0L;
         gracefulExit=$false; cleanupWarning=$null; exceptionType=$null; errorLine=$null;
         scope='Actual launcher GetText and visibility in one real game process, using physical OS input. No screenshot, general gameplay or future-build certification.'}
@@ -39,6 +40,11 @@ function Invoke-LauncherAcceptance([string]$GameRoot, [string]$Assets, [string]$
     function Drain-Launcher {
         $row=$null
         while($script:la.session.Rows.TryDequeue([ref]$row)){
+            if($script:la.lagMode){
+                $lag=Read-LagRow $row
+                if($null -ne $lag -and $script:la.lagRows.Count -lt 1000){$script:la.lagRows.Add($lag)}
+                if($row.Payload -cmatch '^AZSG(G1|H2)\|[A-Za-z0-9_.|_-]{1,500}$' -and $script:la.nativeProfiles.Count -lt 2000){$script:la.nativeProfiles.Add([pscustomobject]@{fileTime=$row.FileTime;payload=$row.Payload})}
+            }
             $parsed=Read-LauncherRow $row
             if($null -ne $parsed -and $script:la.rows.Count -lt 2000){$script:la.rows.Add($parsed);$script:la.current=$parsed}
             $row=$null
@@ -167,6 +173,11 @@ function Invoke-LauncherAcceptance([string]$GameRoot, [string]$Assets, [string]$
         $observer=Join-Path $state 'AddOns\AZSGLauncherTest';New-Item -ItemType Directory -Path $observer -Force | Out-Null
         Write-Text (Join-Path $observer 'AZSGLauncherTest.toc') "## Interface: 11200`n## Title: AZSG launcher observation`n## Dependencies: AZSSpeedGear`nTelemetry.lua`n"
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'remote_launcher_telemetry.lua') -Destination (Join-Path $observer 'Telemetry.lua')
+        if($script:la.lagMode){
+            $probe="AZSG_LAG_PROBE_REMOTE = true`n"+[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'remote_lag_telemetry.lua'))
+            Write-Text (Join-Path $observer 'Lag.lua') $probe
+            Add-Content -LiteralPath (Join-Path $observer 'AZSGLauncherTest.toc') -Value 'Lag.lua' -Encoding utf8
+        }
         Write-Text (Join-Path $state 'config.toml') "[cvars]`ngxWindow = `"1`"`ngxResolution = `"$script:viewport`"`ngxVSync = `"0`"`nfarclip = `"177`"`nshadowLevel = `"0`"`n"
         $info=[Diagnostics.ProcessStartInfo]::new((Join-Path $destination 'AzerothSurvivors.exe'))
         $info.WorkingDirectory=$destination;$info.UseShellExecute=$false;$info.CreateNoWindow=$true;$info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true
@@ -175,6 +186,12 @@ function Invoke-LauncherAcceptance([string]$GameRoot, [string]$Assets, [string]$
         $info.Environment['WGPU_BACKEND']='dx12';$info.Environment['WGPU_FORCE_FALLBACK_ADAPTER']='1';$info.Environment['WGPU_ADAPTER_NAME']='Microsoft Basic Render Driver'
         $info.Environment['RUST_LOG']='info,wgpu_core=warn,wgpu_hal=warn,naga=warn';$info.Environment['WOW_WIN']=$script:viewport;$info.Environment['BENILLA_HOME']=$state
         $appData=Join-Path $destination 'AppData';New-Item -ItemType Directory -Path $appData | Out-Null
+        if($script:la.lagMode){
+            $variant=if($env:AZSG_LAG_VARIANT -ceq 'speedgear_only'){'speedgear_only'}else{'all'}
+            $script:la.lagProfile=Copy-LagAddons -GameRoot $destination -Variant $variant
+            if($env:AZSG_LAG_VARIANT -ceq 'all_repaired'){& (Join-Path $script:package 'scripts\RepairSpellMeter.ps1') -SourcePath (Join-Path $state 'AddOns\AZSSpellMeter\AZSSpellMeter.lua') | Out-Null}
+            $info.Environment['WOW_GLYPH_CACHE']='1';$info.Environment['WOW_UI_COST']='1';$info.Environment['WOW_UI_HANDLERS']='5'
+        }
         $info.Environment['APPDATA']=$appData;$info.Environment['LOCALAPPDATA']=$appData
         $script:la.session=[AZSGRemoteGame]::new();$script:la.session.Start($info);$script:la.phase='startup'
         $start=[AZSGRemoteGame]::Wall();$lastInput=0L;$heldUntil=0L;$lastEscape=-1L;$playing=$false
@@ -197,7 +214,9 @@ function Invoke-LauncherAcceptance([string]$GameRoot, [string]$Assets, [string]$
         $script:la.phase='captions'
         $initial=$script:la.current
         Assert-Launcher 'initial_numeric_1x' ($initial.shown -eq 1 -and $initial.speed100 -eq 100 -and $initial.caption -ceq $initial.expectedCaption -and $initial.caption.Contains(([char]0xD7).ToString()+'1')) $initial
-        if($script:la.confirmationMode){
+        if($script:la.lagMode){
+            $null = Observe-Lag
+        }elseif($script:la.confirmationMode){
             Observe-Confirmation
         }else{
         Drain-Launcher;$actionStarted=[AZSGRemoteGame]::Wall()
@@ -218,7 +237,7 @@ function Invoke-LauncherAcceptance([string]$GameRoot, [string]$Assets, [string]$
         }
         Assert-Launcher 'software_adapter_observed' $script:la.session.SoftwareObserved $script:la.session.SoftwareObserved
         Assert-Launcher 'no_dropped_telemetry' ($script:la.session.Dropped -eq 0) $script:la.session.Dropped
-        $script:la.status='passed';$script:la.reason=if($script:la.confirmationMode){'actual_measurement_confirmation_held_with_fresh_independent_raw_progress'}else{'actual_launcher_text_keeps_numeric_speed_during_physical_switch'}
+        $script:la.status='passed';$script:la.reason=if($script:la.lagMode){'bounded_lag_observations_not_a_resolution_verdict'}elseif($script:la.confirmationMode){'actual_measurement_confirmation_held_with_fresh_independent_raw_progress'}else{'actual_launcher_text_keeps_numeric_speed_during_physical_switch'}
     }catch{
         $message=[string]$_.Exception.Message
         $script:la.status=if($message -cmatch '^failed_[a-z0-9_]+$'){'failed'}else{'blocked'}
@@ -238,5 +257,6 @@ function Invoke-LauncherAcceptance([string]$GameRoot, [string]$Assets, [string]$
         samples=$script:la.rows.ToArray();inputs=$script:la.inputs.ToArray();nativeTransitions=$script:la.native.ToArray();nativeLogEvents=$script:la.nativeLog.ToArray();
         guardFallbackObserved=(@($script:la.rows|Where-Object guard -eq 1).Count -gt 0);gracefulExit=$script:la.gracefulExit;cleanupWarning=$script:la.cleanupWarning;
         confirmationMode=$script:la.confirmationMode;confirmationMetrics=$script:la.confirmationMetrics;nativeSnapshots=$script:la.nativeSnapshots.ToArray();
+        lagMode=$script:la.lagMode;lagVariant=$env:AZSG_LAG_VARIANT;lagProfile=$script:la.lagProfile;lagMetrics=$script:la.lagMetrics;lagSamples=$script:la.lagRows.ToArray();nativeProfiles=$script:la.nativeProfiles.ToArray();
         exceptionType=$script:la.exceptionType;errorLine=$script:la.errorLine;scope=$script:la.scope}
 }

@@ -154,6 +154,8 @@ if(BUILD_TESTING)
     # This is a test-only interpreter. The native plugin remains optimized.
     target_compile_options(lua50 PRIVATE /Od)
     add_test(NAME Lua50Addon COMMAND lua50 tests/addon_test.lua)
+    add_test(NAME Lua50LagObserverCompile COMMAND lua50 tests/lag_observer_load.lua)
+    set_tests_properties(Lua50LagObserverCompile PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
     if(DEFINED ENV{AZSG_METER_SOURCE})
       add_test(NAME Lua50SpellMeterSoak COMMAND lua50 tests/spell_meter_soak.lua "$ENV{AZSG_METER_SOURCE}")
       add_test(NAME Lua50MeterDataGrowth COMMAND lua50 tests/meter_data_growth.lua "$ENV{AZSG_METER_SOURCE}")
