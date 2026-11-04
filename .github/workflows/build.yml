@@ -102,6 +102,10 @@ jobs:
           ./tests/native_updater_test.ps1
           ./tests/installer_test.ps1
           ./tests/toc_notes_test.ps1
+          $legacy = Join-Path $env:RUNNER_TEMP 'PS51Meter.lua'
+          Copy-Item -LiteralPath $env:AZSG_METER_ORIGINAL -Destination $legacy
+          $repair = ./scripts/RepairSpellMeter.ps1 -SourcePath $legacy
+          if (-not $repair.Changed -or $repair.SHA256 -cne 'a724462a9a14ce94017c0c2a4324416804e9be2369444aad422c386eba00d2a5') { throw 'Windows PowerShell repair failed' }
       - name: Package
         run: ./scripts/Package.ps1
       - uses: actions/upload-artifact@v4
