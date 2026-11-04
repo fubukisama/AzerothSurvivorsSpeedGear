@@ -29,12 +29,28 @@ jobs:
           tar --exclude=lua-5.0.3/test/lua --exclude=lua-5.0.3/test/luac -xzf $archive -C $luaDir
           if ($LASTEXITCODE -ne 0) { throw 'Lua source extraction failed.' }
           Add-Content $env:GITHUB_ENV "LUA50_ROOT=$luaDir/lua-5.0.3"
+      - name: Fetch pinned installed SpellMeter source for independent diagnosis
+        shell: pwsh
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP 'AZSSpellMeter-1.32.lua'
+          Invoke-WebRequest 'https://raw.githubusercontent.com/kex0/AZSSpellMeter/c22ea820766046e7bd9b0ba7612c97a9ffac0c7a/AZSSpellMeter.lua' -OutFile $path
+          if ((Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne '2265a223d9e2f01f82f45290d885b884e4dbe8026352f2815956608f837f0cb3') { throw 'Meter source identity mismatch' }
+          Add-Content $env:GITHUB_ENV "AZSG_METER_SOURCE=$path"
       - name: Configure
         run: cmake -S . -B build -A x64 "-DLUA50_ROOT=$env:LUA50_ROOT"
       - name: Build
         run: cmake --build build --config Release --parallel 4
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Record independent native clock throughput
+        if: ${{ !cancelled() }}
+        run: ./tools/remote_clock_contention.ps1 -HostPath build/Release/clock_contention_test.exe -DllPath build/Release/dwmapi.dll -OutputPath acceptance/clock-contention.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LagDiagnostics
+          path: acceptance/clock-contention.json
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: always()
         with:
