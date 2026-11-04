@@ -76,7 +76,7 @@ private:
     std::thread thread_;
 };
 
-std::string status(const std::filesystem::path& root) {
+std::string readStatus(const std::filesystem::path& root) {
     const auto path=root/L"AZSSpeedGear-status.json";
     std::error_code error;const auto size=std::filesystem::file_size(path,error);
     if(error || size>16384) return {};
@@ -87,7 +87,7 @@ bool settle(const std::filesystem::path& root,unsigned speed,Heartbeat* heartbea
     if(heartbeat) heartbeat->target(speed);
     const auto deadline=wall()+80000000;
     do {
-        const auto text=status(root);
+        const auto text=readStatus(root);
         const auto speed_field="\"speed100\":"+std::to_string(speed)+",";
         if(text.find("\"backend\":\"ready\"")!=std::string::npos && text.find(speed_field)!=std::string::npos) {
             const auto observed=qpc_rate();

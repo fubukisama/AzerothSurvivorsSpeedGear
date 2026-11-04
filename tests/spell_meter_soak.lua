@@ -37,6 +37,7 @@ CreateFrame = function(kind, name) local frame = widget(name); frames[name] = fr
 GetTime = function() return clock; end;
 AZS_GetRunTime = function() return clock - 1000; end;
 AZS_GetMeter = function() return {}, 0, 0; end;
+UnitName = function() return "FixturePlayer"; end;
 AZSSpellMeterDB = { mini = true, shown = true, view = "damage", viewChosen = true };
 dofile(arg[1]);
 
@@ -107,6 +108,14 @@ run(20, 1);
 print(string.format("MINI returned_1x hidden_mutations=%d full_window_refreshes=%d",
     hiddenWrites - before, fullRefreshes - calls));
 check(hiddenWrites == before, "returning to 1x must not retain collapsed-table refresh work");
+-- Hostile deaths bypass the periodic 0.2s throttle in the production handler,
+-- even if the creature has no credited player spell in lastBlow.
+before, calls = hiddenWrites, fullRefreshes;
+event, arg1 = "CHAT_MSG_COMBAT_HOSTILE_DEATH", "Fixture creature dies.";
+for index = 1, 1000 do driver.scripts.OnEvent(); end
+print(string.format("MINI death_burst events=1000 hidden_mutations=%d full_window_refreshes=%d",
+    hiddenWrites - before, fullRefreshes - calls));
+check(hiddenWrites == before, "collapsed bubble must not rebuild hidden rows for each hostile-death event");
 main.shown = true; bubble.shown = false; AZSSpellMeterDB.mini = false;
 calls = fullRefreshes;
 refresh();
