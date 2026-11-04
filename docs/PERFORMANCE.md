@@ -10,9 +10,8 @@ does. Selecting 5x immediately triggers the existing frame guard. These symptoms
 do not yet identify one sole cause or prove a memory leak.
 
 Compare runs near the same five-minute game progress and similar combat load.
-An earlier interpretation of four real minutes at 3x as twelve game minutes was
-incorrect and must not be used as evidence. A selected multiplier is not itself
-a measurement of the effective simulation rate.
+No elapsed wall time was reported, and a selected multiplier is not itself a
+measurement of the effective simulation rate.
 
 ## Client and evidence boundary
 

@@ -99,6 +99,11 @@ public:
 
     std::uint32_t speed100() const noexcept { return speed100_; }
     bool initialized() const noexcept { return initialized_; }
+    // A writer can publish a read-only affine epoch without discarding the
+    // sub-tick fraction that the existing clock carries between observations.
+    std::uint64_t real_anchor() const noexcept { return real_; }
+    std::uint64_t virtual_anchor() const noexcept { return virtual_; }
+    std::uint32_t fractional_remainder() const noexcept { return remainder_; }
 
 private:
     std::uint64_t real_ = 0;

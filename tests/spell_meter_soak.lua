@@ -40,7 +40,6 @@ GetTime = function() return clock; end;
 AZS_GetRunTime = function() return clock - 1000; end;
 AZS_GetMeter = function() return {}, nativeTotal, 0; end;
 AZS_GetHealing = function() return {}, 4321, 0; end;
-AZS_GetHealing = AZS_GetMeter;
 UnitName = function() return "FixturePlayer"; end;
 AZSSpellMeterDB = { mini = true, shown = true, view = "damage", viewChosen = true };
 dofile(arg[1]);

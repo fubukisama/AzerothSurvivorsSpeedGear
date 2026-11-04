@@ -66,7 +66,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           $before = Join-Path $env:RUNNER_TEMP 'AZSGClockBefore'
+          git fetch --depth 1 origin 25f3c1c5fa289707196ef2a58d95834612a8661f
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch stable backend comparison' }
           git worktree add --detach $before 25f3c1c5fa289707196ef2a58d95834612a8661f
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot stage stable backend comparison' }
           cmake -S $before -B "$before/build" -A x64 -DBUILD_TESTING=OFF
           if ($LASTEXITCODE -ne 0) { throw 'Cannot configure stable backend comparison' }
           cmake --build "$before/build" --config Release --target AZSSpeedGear --parallel 4

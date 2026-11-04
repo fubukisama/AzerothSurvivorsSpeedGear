@@ -2,7 +2,7 @@
 param([string]$Configuration = 'Release')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$version = '0.7.4'
+$version = '0.7.5'
 $package = Join-Path $root ('dist\AZSSpeedGear-' + $version + '-Windows-x64')
 if (Test-Path -LiteralPath $package) { throw 'Package folder already exists; use a new clean output directory.' }
 foreach ($directory in @('AddOns','Native','scripts','docs','licenses')) {
@@ -30,6 +30,8 @@ finally { $algorithm.Dispose() }
 Copy-Item -LiteralPath (Join-Path $root "build\$Configuration\dwmapi.dll") -Destination (Join-Path $package 'Native\dwmapi.dll')
 Copy-Item -LiteralPath (Join-Path $root "build\$Configuration\AZSSpeedGearProbe.exe") -Destination (Join-Path $package 'Native\AZSSpeedGearProbe.exe')
 foreach ($file in @('Install.ps1','Uninstall.ps1','Status.ps1','Update.ps1','Start.ps1','NativeUpdate.ps1','TocNotes.ps1')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $package "scripts\$file") }
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RepairSpellMeter.ps1') -Destination (Join-Path $package 'scripts\RepairSpellMeter.ps1')
+Copy-Item -LiteralPath (Join-Path $root 'docs\PERFORMANCE.md') -Destination (Join-Path $package 'docs\PERFORMANCE.md')
 foreach ($file in @('README.md','README.zh-CN.md','LICENSE','THIRD_PARTY_NOTICES.md')) { Copy-Item -LiteralPath (Join-Path $root $file) -Destination (Join-Path $package $file) }
 Copy-Item -LiteralPath (Join-Path $root 'docs\COMPATIBILITY.md') -Destination (Join-Path $package 'docs\COMPATIBILITY.md')
 if (Test-Path -LiteralPath (Join-Path $root 'docs\VALIDATION.md')) { Copy-Item -LiteralPath (Join-Path $root 'docs\VALIDATION.md') -Destination (Join-Path $package 'docs\VALIDATION.md') }
