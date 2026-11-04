@@ -23,18 +23,67 @@ jobs:
           $luaDir = Join-Path $env:RUNNER_TEMP 'AZSSpeedGearLua50'
           New-Item -ItemType Directory -Path $luaDir -Force | Out-Null
           $archive = Join-Path $luaDir 'lua-5.0.3.tar.gz'
-          Invoke-WebRequest 'https://www.lua.org/ftp/lua-5.0.3.tar.gz' -OutFile $archive
+          Copy-Item -LiteralPath third_party/lua50/lua-5.0.3.tar.gz -Destination $archive
           $expected = '1193a61b0e08acaa6eee0eecf29709179ee49c71baebc59b682a25c3b5a45671'
           if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Lua source checksum mismatch.' }
           tar --exclude=lua-5.0.3/test/lua --exclude=lua-5.0.3/test/luac -xzf $archive -C $luaDir
           if ($LASTEXITCODE -ne 0) { throw 'Lua source extraction failed.' }
           Add-Content $env:GITHUB_ENV "LUA50_ROOT=$luaDir/lua-5.0.3"
+      - name: Fetch pinned installed SpellMeter source for independent diagnosis
+        shell: pwsh
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP 'AZSSpellMeter-1.32.lua'
+          Invoke-WebRequest 'https://raw.githubusercontent.com/kex0/AZSSpellMeter/c22ea820766046e7bd9b0ba7612c97a9ffac0c7a/AZSSpellMeter.lua' -OutFile $path
+          if ((Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne '2265a223d9e2f01f82f45290d885b884e4dbe8026352f2815956608f837f0cb3') { throw 'Meter source identity mismatch' }
+          Add-Content $env:GITHUB_ENV "AZSG_METER_ORIGINAL=$path"
+          Add-Content $env:GITHUB_ENV "AZSG_METER_SOURCE=$($path.Replace('.lua','-repaired.lua'))"
       - name: Configure
         run: cmake -S . -B build -A x64 "-DLUA50_ROOT=$env:LUA50_ROOT"
       - name: Build
+        id: compile_native
         run: cmake --build build --config Release --parallel 4
+      - name: Verify original failure and repair the disposable meter source
+        run: |
+          & ./build/Release/lua50.exe tests/spell_meter_soak.lua $env:AZSG_METER_ORIGINAL 2>&1 | Tee-Object -FilePath meter-original.txt
+          if ($LASTEXITCODE -eq 0) { throw 'Pinned original unexpectedly passed the performance regression' }
+          Copy-Item -LiteralPath $env:AZSG_METER_ORIGINAL -Destination $env:AZSG_METER_SOURCE
+          $repair = ./scripts/RepairSpellMeter.ps1 -SourcePath $env:AZSG_METER_SOURCE
+          if (-not $repair.Changed) { throw 'First repair did not apply' }
+          $again = ./scripts/RepairSpellMeter.ps1 -SourcePath $env:AZSG_METER_SOURCE
+          if ($again.Changed) { throw 'Repair is not idempotent' }
+          $unknown = Join-Path $env:RUNNER_TEMP 'unknown-meter.lua'
+          [IO.File]::WriteAllText($unknown, '-- unsupported source')
+          $before = (Get-FileHash $unknown).Hash
+          $rejected = $false
+          try { ./scripts/RepairSpellMeter.ps1 -SourcePath $unknown | Out-Null } catch { $rejected = $true }
+          if (-not $rejected -or (Get-FileHash $unknown).Hash -cne $before) { throw 'Unknown source protection failed' }
+          $global:LASTEXITCODE = 0
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Record independent native clock throughput
+        if: ${{ !cancelled() && steps.compile_native.outcome == 'success' }}
+        run: ./tools/remote_clock_contention.ps1 -HostPath build/Release/clock_contention_test.exe -DllPath build/Release/dwmapi.dll -OutputPath acceptance/clock-contention.json
+      - name: Compare the same host with the previous stable backend
+        if: ${{ !cancelled() && steps.compile_native.outcome == 'success' }}
+        run: |
+          $before = Join-Path $env:RUNNER_TEMP 'AZSGClockBefore'
+          git fetch --depth 1 origin 25f3c1c5fa289707196ef2a58d95834612a8661f
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch stable backend comparison' }
+          git worktree add --detach $before 25f3c1c5fa289707196ef2a58d95834612a8661f
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot stage stable backend comparison' }
+          cmake -S $before -B "$before/build" -A x64 -DBUILD_TESTING=OFF
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot configure stable backend comparison' }
+          cmake --build "$before/build" --config Release --target AZSSpeedGear --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot build stable backend comparison' }
+          ./tools/remote_clock_contention.ps1 -HostPath build/Release/clock_contention_test.exe -DllPath "$before/build/Release/dwmapi.dll" -OutputPath acceptance/clock-before.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LagDiagnostics
+          path: |
+            acceptance/clock-contention.json
+            acceptance/clock-before.json
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -53,6 +102,10 @@ jobs:
           ./tests/native_updater_test.ps1
           ./tests/installer_test.ps1
           ./tests/toc_notes_test.ps1
+          $legacy = Join-Path $env:RUNNER_TEMP 'PS51Meter.lua'
+          Copy-Item -LiteralPath $env:AZSG_METER_ORIGINAL -Destination $legacy
+          $repair = ./scripts/RepairSpellMeter.ps1 -SourcePath $legacy
+          if (-not $repair.Changed -or $repair.SHA256 -cne 'a724462a9a14ce94017c0c2a4324416804e9be2369444aad422c386eba00d2a5') { throw 'Windows PowerShell repair failed' }
       - name: Package
         run: ./scripts/Package.ps1
       - uses: actions/upload-artifact@v4

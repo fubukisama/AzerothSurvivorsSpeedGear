@@ -1,4 +1,19 @@
-# Validation — updated 2026-11-01
+# Validation — updated 2026-11-04
+
+## Version 0.7.5 minimized SpellMeter repair
+
+The pinned installed SpellMeter 1.32 source reproduced extra hidden GUI work in
+remote run 41820036292: 2,668 hidden mutations over twenty 1x fixture seconds,
+8,700 at 3x, another 2,668 after restoring 1x, and 29,000 for 1,000 death events.
+The repair removes hidden row painting and defers death-event painting to the
+existing periodic updater. The fixed-source fixture verifies live totals,
+detached windows and synchronous kill attribution. Repair checks cover exact
+input/output hashes, backups, idempotence and refusal of unknown input.
+
+These are actual original/repaired Lua closures with controlled client
+dependencies, not full-game FPS or memory-leak causation evidence. See
+[the investigation](PERFORMANCE.md) for limitations and the clock experiment
+that was not adopted. Shipped clock algorithms and protection are unchanged.
 
 ## Version 0.7.4 compact localized panel
 
