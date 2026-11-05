@@ -36,6 +36,47 @@ the whole game again. Structural compatibility alone is not a gameplay or
 performance result. Historical 0.131.0/0.140.0 observations remain scoped to
 their recorded identities.
 
+## Version 0.7.8 scratch storage and label submission
+
+The production raw-time adapter now lends one reusable packet; measurement and
+diagnostic history retain only copied scalar values. Keijin reuses its bounded
+rectangle list, up to six rectangle rows and per-callback anchor lookup maps.
+Frame references and anchor names are cleared after use. Active label and icon
+pools retain the existing caps; no new unbounded history is introduced.
+
+The remote pre-fix regression `41985680779` held the Lua collector threshold
+above the small fixture workload to measure allocation pressure: 10,000 raw
+adapter reads grew the allocator count by 2,187 KiB, and 2,000 stable animation
+callbacks by 2,735 KiB. After scratch reuse, `41986385404` observed zero KiB
+growth at gcinfo's integer-KiB resolution for both. This is a controlled Lua
+allocation comparison, not process RSS, retained memory or a leak diagnosis.
+Collector-threshold changes occur only in the remote fixture, never the addon.
+
+Same-callback damage hits still update amount/hit counters immediately. Text
+formatting, native text writes, width measurement and position submission are
+coalesced into each live label's animation callback. For 100 same-ability hits,
+remote run `41987173732` reduced text/position/width calls from 100/102/100 to
+1/1/1 while retaining all 100 hits. Geometry, fonts, unrelated abilities,
+list-mode forwarding, icon visibility, stop and pooled reuse remain covered.
+
+Normal callback age and the original 0.12-second merge window are retained.
+If a long callback would retire a never-presented label or a fresh aggregate,
+that value receives one final presentation before retirement. It cannot accept
+further merges or stay alive indefinitely. This presentation allowance does
+not modify game simulation, control timing or the 250ms / three-update guard.
+
+Repair revision 2 accepts either the pinned original integration or the 0.7.7
+repair, produces the same source bytes and backs up whichever input it receives.
+The verified output SHA-256 is
+`c9fd4c38aff45c5958231a74bfc63ad709e2bff3793f680db20a385765014f75`.
+Unknown edits remain refused. The runtime exposes frame-work level separately
+from the compatible width-cache/light-text interface, so the remote feature
+smoke cannot accept an old width-only repair as the new implementation.
+
+These are allocation/call reductions. They do not establish the cause or full
+resolution of the reported late-run slowdown. Source-specific results and
+current-client functional boundaries are recorded in VALIDATION.md.
+
 ## Version 0.7.7 targeted reductions
 
 The Keijin 4.6.1 damage-only integration has a repeated width-measurement path
