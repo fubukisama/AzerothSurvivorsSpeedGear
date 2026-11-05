@@ -374,6 +374,7 @@ check(not AZSSpeedGear.panel.shown, "saved hidden panel restored");
 check(AZSSpeedGear.panel.x == 35 and AZSSpeedGear.panel.y == -40, "saved position restored");
 fire("PLAYER_ENTERING_WORLD");
 check(AZSSpeedGear.controller.active and AZSSpeedGear.controller.speed100 == 100, "world entry starts at x1");
+SlashCmdList.AZSSPEEDGEAR("show");
 check(AZSSpeedGear.controller.sendStatus == "instant_attempt" and hasPanelText(AZSSpeedGearI18n.Text("send_instant_attempt")),
     "production nil-returning ConsoleExec is displayed as an attempt rather than native acknowledgement");
 check(hasPanelText("AzerothSurvivorsSpeedGear"), "panel title uses exact English project name");
@@ -559,8 +560,10 @@ check(not AZSSpeedGear.panel.shown and AZSSpeedGear.launcher.text == launcherCap
     "confirmed x2 appears on launcher while main panel is hidden");
 SlashCmdList.AZSSPEEDGEAR("2");
 advanceUI(4, 4);
+SlashCmdList.AZSSPEEDGEAR("show");
 check(AZSSpeedGear.controller.measurementMismatch and AZSSpeedGear.controller.confirmedSpeed100 == nil
     and hasPanelText(AZSSpeedGearI18n.Text("below_target")), "independent x4 progress against requested x2 reports a generic mismatch, not a successful speed");
+SlashCmdList.AZSSPEEDGEAR("hide");
 
 SlashCmdList.AZSSPEEDGEAR("5");
 check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == targetCaption("5"),
