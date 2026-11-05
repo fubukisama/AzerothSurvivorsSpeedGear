@@ -8,7 +8,7 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $originalSHA='16d058315a36f1dd48be8240c5b776924a3901b0ab80ae62b39f697bedd3f141'
 $previousSHA='c38f46e994a6d60632bedd3c29408d4f5d2bef423435c58f6800d793e7fd651b'
-$repairedSHA='41205f0dc3deff529cd5571358a820152cc9ef6918ee93d0aefc69a7f2bc1456'
+$repairedSHA='c9fd4c38aff45c5958231a74bfc63ad709e2bff3793f680db20a385765014f75'
 $sourceVersion='4.6.1-damageonly.1'
 $utf8=New-Object Text.UTF8Encoding($false,$true)
 function Get-SHA256([byte[]]$Bytes) {
@@ -359,22 +359,23 @@ $newFrameWork6=@'
     while i<=table.getn(active) do
         local item=active[i]
         local previousAge=item.age
-        if item.azsgPending then item.azsgPending=nil
-        else item.age=item.age+dt end
+        local pending=item.azsgPending;item.azsgPending=nil
+        item.age=item.age+dt
         local s=item.style
         local life=s.life
-        if item.azsgRetire or (item.age>=life and not item.azsgTextDirty) then Give(table.remove(active,i))
+        if item.azsgRetire or (item.age>=life and not item.azsgTextDirty and not pending) then Give(table.remove(active,i))
         else
             -- A hitch must not discard a fresh aggregate before its one final
             -- presentation. It is ineligible for further merging and retires
             -- on the next callback, so this does not grow the active pool.
-            if item.age>=life then item.age=previousAge;item.azsgRetire=true end
+            local renderAge=item.age
+            if item.age>=life then renderAge=pending and 0 or previousAge;item.azsgRetire=true end
             if item.azsgTextDirty then
                 local text=item.azsgText
                 if item.hits and item.hits>1 then text=string.format("%.0f",item.amount).." x"..item.hits end
                 item.fs:SetText(text);item.azsgText=text;item.azsgTextDirty=nil
             end
-            local t=item.age/life
+            local t=renderAge/life
             item.fs:ClearAllPoints()
             if item.scroll then
                 if item.name then
@@ -393,6 +394,22 @@ $newFrameWork6=@'
 
 '@
 $oldFrameWork7=@'
+                if item.icon then item.icon:SetAlpha(alpha) end
+                if item.pop then
+                    local size=math.floor(s.size*PopFactor(item.age)+0.5)
+                    if size~=item.size then SetSize(item,size) end
+                end
+
+'@
+$newFrameWork7=@'
+                if item.icon then item.icon:SetAlpha(alpha) end
+                if item.pop then
+                    local size=math.floor(s.size*PopFactor(renderAge)+0.5)
+                    if size~=item.size then SetSize(item,size) end
+                end
+
+'@
+$oldFrameWork8=@'
                 item.fs:SetAlpha(K.damageText.Opacity(s,t))
             end
             i=i+1
@@ -403,7 +420,7 @@ end)
 K.On("PLAYER_ENTERING_WORLD",function() average=nil end,"combatText")
 
 '@
-$newFrameWork7=@'
+$newFrameWork8=@'
                 item.fs:SetAlpha(K.damageText.Opacity(s,t))
             end
             if not item.azsgPresented then
@@ -419,7 +436,7 @@ end)
 K.On("PLAYER_ENTERING_WORLD",function() average=nil end,"combatText")
 
 '@
-foreach($pair in @(@($oldFrameWork0,$newFrameWork0),@($oldFrameWork1,$newFrameWork1),@($oldFrameWork2,$newFrameWork2),@($oldFrameWork3,$newFrameWork3),@($oldFrameWork4,$newFrameWork4),@($oldFrameWork5,$newFrameWork5),@($oldFrameWork6,$newFrameWork6),@($oldFrameWork7,$newFrameWork7))) {
+foreach($pair in @(@($oldFrameWork0,$newFrameWork0),@($oldFrameWork1,$newFrameWork1),@($oldFrameWork2,$newFrameWork2),@($oldFrameWork3,$newFrameWork3),@($oldFrameWork4,$newFrameWork4),@($oldFrameWork5,$newFrameWork5),@($oldFrameWork6,$newFrameWork6),@($oldFrameWork7,$newFrameWork7),@($oldFrameWork8,$newFrameWork8))) {
     if(([regex]::Matches($updated,[regex]::Escape($pair[0]))).Count -ne 1) { throw 'Pinned frame-work layout changed; no source was changed.' }
     $updated=$updated.Replace($pair[0],$pair[1])
 }

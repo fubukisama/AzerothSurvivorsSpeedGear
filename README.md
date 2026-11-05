@@ -3,10 +3,10 @@
 Version 0.7.8 reuses raw-time snapshots and Keijin's frame geometry/anchor scratch
 storage. Repeated damage hits still update their totals immediately, but each
 live label submits its final text and position once per animation callback.
-New labels start their lifetime at first submission; a fresh aggregate delayed
-past expiry gets one final submission and then retires, instead of vanishing
-before it can be submitted. Stop, label caps, styles and statistical events
-retain their existing behavior.
+The original callback-based age and merge window are retained. A new label or
+fresh aggregate delayed past expiry gets one final submission and then retires,
+instead of vanishing before it can be submitted. Stop, label caps, styles and
+statistical events retain their existing behavior.
 
 The guarded Keijin repair upgrades either the original supported damage-only
 source or the 0.7.7 repair to the same revision-2 output, with exact input backups.

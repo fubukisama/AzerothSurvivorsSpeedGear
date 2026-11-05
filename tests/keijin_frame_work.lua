@@ -108,6 +108,9 @@ check(not cancelled.fs.shown and table.getn(K.damageText.active)==0, "stop cance
 hit(3,"A");hit(4,"B","Other");tick(0);
 check(table.getn(K.damageText.active)==2, "unrelated abilities keep separate labels");
 K.damageText.Stop();
+hit(1);tick(.121);hit(2);
+check(table.getn(K.damageText.active)==2, "deferred first painting does not extend the existing 0.12-second merge window");
+K.damageText.Stop();
 -- An anchor is reused within one callback, then looked up afresh next time.
 db.combatTextMerge=false;db.combatTextPosition="plate";
 local plateX=700;K.PlateAnchor=function() plateCalls=plateCalls+1;return plateX,500 end;
