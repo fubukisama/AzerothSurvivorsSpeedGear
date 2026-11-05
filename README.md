@@ -1,5 +1,19 @@
 # AzerothSurvivorsSpeedGear
 
+Version 0.7.8 reuses raw-time snapshots and Keijin's frame geometry/anchor scratch
+storage. Repeated damage hits still update their totals immediately, but each
+live label submits its final text and position once per animation callback.
+New labels start their lifetime at first submission; a fresh aggregate delayed
+past expiry gets one final submission and then retires, instead of vanishing
+before it can be submitted. Stop, label caps, styles and statistical events
+retain their existing behavior.
+
+The guarded Keijin repair upgrades either the original supported damage-only
+source or the 0.7.7 repair to the same revision-2 output, with exact input backups.
+The native timing algorithms and 250ms / three-update protection are unchanged.
+These are targeted allocation/call reductions, not a late-run lag-resolution
+or sustained-5x guarantee.
+
 Version 0.7.7 caches repeated Keijin floating-text width measurements and adds
 an optional light-text mode under **Details**. The separate guarded
 `scripts/RepairKeijin.ps1 -GamePath <AzerothSurvivors.exe>` supports only the

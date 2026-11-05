@@ -197,7 +197,7 @@ function Invoke-LauncherAcceptance([string]$GameRoot, [string]$Assets, [string]$
                 $script:la.lagProfile | Add-Member -NotePropertyName meterRepairSHA256 -NotePropertyValue $meter.SHA256
             }
             if($lagVariant -ceq 'all_repaired'){
-                $keijin=& (Join-Path $script:package 'scripts\RepairKeijin.ps1') -SourcePath (Join-Path $state 'AddOns\KeijinUI\DamageText.lua')
+                $keijin=& (Join-Path $script:package 'scripts\RepairKeijin.ps1') -GamePath (Join-Path $destination 'AzerothSurvivors.exe')
                 $script:la.lagProfile | Add-Member -NotePropertyName keijinRepairSHA256 -NotePropertyValue $keijin.SHA256
             }
             $script:la.lagProfile | Add-Member -NotePropertyName optimizedFeaturesOptIn -NotePropertyValue ($lagVariant -ceq 'all_repaired')

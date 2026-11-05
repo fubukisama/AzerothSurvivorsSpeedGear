@@ -197,7 +197,10 @@ local function diagnosticFeatures(controller, phase)
     local marker = 0;
     if (type(KeijinUI) == "table" and type(KeijinUI.damageText) == "table") then
         local revision = KeijinUI.damageText.azsgPerformanceRevision;
-        if (revision ~= nil) then marker = revision == 1 and 1 or -1; end
+        if (revision ~= nil) then
+            marker = revision == 1 and 1 or -1;
+            if (revision == 1 and KeijinUI.damageText.azsgFrameWorkRevision == 1) then marker = 2; end
+        end
     end
     local lite = type(AZSSpeedGear) == "table" and AZSSpeedGear.lightweightCombatText == true
         and type(AZSSpeedGearDB) == "table" and AZSSpeedGearDB.lightweightCombatText == true;
