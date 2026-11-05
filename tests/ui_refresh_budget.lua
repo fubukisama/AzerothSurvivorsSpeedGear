@@ -91,7 +91,7 @@ local function stub(name, kind, parent)
     function frame:CreateFontString()
         local font = stub(nil, "FontString", self); table.insert(self.fonts, font); return font;
     end
-    if (name) then frames[name] = frame; end
+    if (name) then frames[name] = frame; _G[name] = frame; end
     return frame;
 end
 
@@ -276,8 +276,10 @@ invoke(AZSSpeedGear.launcher, "OnLeave");
 check(not controller:DiagnosticsEnabled(), "diagnostic recording starts off");
 check(AZSSpeedGear.lightweightCombatText == false, "lightweight text starts off");
 show(); click("AZSSpeedGearDetails");
-check(frames.AZSSpeedGearLightText:IsShown() and frames.AZSSpeedGearDiagnostics:IsShown(),
+check(frames.AZSSpeedGearLightText:IsShown() and frames.AZSSpeedGearDiagnosticToggle:IsShown(),
     "optional controls are reachable in Details");
+check(type(AZSSpeedGearDiagnostics.NewRecorder) == "function",
+    "named native widgets cannot replace the diagnostic module global");
 local beforeFlag = AZSSpeedGear.lightweightCombatText;
 KeijinUI = nil; click("AZSSpeedGearLightText");
 check(AZSSpeedGear.lightweightCombatText == beforeFlag, "missing Keijin cannot claim an active display mode");
@@ -288,7 +290,7 @@ check(AZSSpeedGear.lightweightCombatText and AZSSpeedGearDB.lightweightCombatTex
 click("AZSSpeedGearLightText");
 check(not AZSSpeedGear.lightweightCombatText and AZSSpeedGearDB.lightweightCombatText == false,
     "lightweight display can be restored without changing speed");
-click("AZSSpeedGearDiagnostics"); run(1, 60, 1);
+click("AZSSpeedGearDiagnosticToggle"); run(1, 60, 1);
 check(controller:DiagnosticsEnabled(), "diagnostics start only after clicking their control");
 local trace = controller:ExportDiagnostics();
 check(trace.frameCount > 0 and trace.nativeReceiptAvailable == false,
@@ -306,21 +308,21 @@ run(1, 60, 1);
 local _, _, frozen = controller:DiagnosticCounts();
 check(frozen and AZSSpeedGearDB.diagnosticTrace.framesFrozen,
     "the first protected window is automatically retained after its bounded post-window");
-click("AZSSpeedGearDiagnostics");
+click("AZSSpeedGearDiagnosticToggle");
 check(not controller:DiagnosticsEnabled(), "the record control stops collection immediately");
 local languages = {"en","zh","ja","pl","cs","de","pt","es","fr","ro","tr","ru","uk","ko"};
 for _, code in ipairs(languages) do
     AZSSpeedGearNativeLocale = code; AZSSpeedGearI18n.Refresh();
     check(frames.AZSSpeedGearLightText.text == AZSSpeedGearI18n.Text("perf_lite_off"),
         "lightweight caption follows game language: " .. code);
-    check(frames.AZSSpeedGearDiagnostics.text == AZSSpeedGearI18n.Text("diagnostics_off"),
+    check(frames.AZSSpeedGearDiagnosticToggle.text == AZSSpeedGearI18n.Text("diagnostics_off"),
         "diagnostic caption follows game language: " .. code);
-    for _, control in ipairs({frames.AZSSpeedGearLightText,frames.AZSSpeedGearDiagnostics,frames.AZSSpeedGearKeepTrace}) do
+    for _, control in ipairs({frames.AZSSpeedGearLightText,frames.AZSSpeedGearDiagnosticToggle,frames.AZSSpeedGearKeepTrace}) do
         check(control:GetWidth() <= AZSSpeedGear.panel:GetWidth() - 32,
             "optional button width fits the panel: " .. code);
     end
 end
-click("AZSSpeedGearDiagnostics"); hide(); run(0.2, 60, 1);
+click("AZSSpeedGearDiagnosticToggle"); hide(); run(0.2, 60, 1);
 fire("PLAYER_LEAVING_WORLD");
 check(not controller:DiagnosticsEnabled() and AZSSpeedGearDB.diagnosticTrace,
     "leaving the world stops recording and retains the last report");

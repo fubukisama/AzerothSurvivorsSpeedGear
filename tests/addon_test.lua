@@ -311,7 +311,7 @@ local function frameStub(name)
         table.insert(self.fontStrings, font);
         return font;
     end
-    if (name) then frames[name] = frame; end
+    if (name) then frames[name] = frame; _G[name] = frame; end
     return frame;
 end
 

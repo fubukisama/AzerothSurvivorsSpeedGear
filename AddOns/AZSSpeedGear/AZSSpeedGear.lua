@@ -1516,7 +1516,7 @@ local function buildPanel()
         layoutState.features.refresh(); layoutPanel();
     end);
     w.lite = addButton(panel, "AZSSpeedGearLightText", "perf_lite_off", 0, 0, 44, layoutState.features.toggleLite);
-    w.trace = addButton(panel, "AZSSpeedGearDiagnostics", "diagnostics_off", 0, 0, 44, layoutState.features.toggleTrace);
+    w.trace = addButton(panel, "AZSSpeedGearDiagnosticToggle", "diagnostics_off", 0, 0, 44, layoutState.features.toggleTrace);
     w.traceSave = addButton(panel, "AZSSpeedGearKeepTrace", "diagnostics_save", 0, 0, 44,
         function() layoutState.features.save(true); end);
     w.trace:SetScript("OnEnter", function()
