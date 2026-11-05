@@ -7,6 +7,9 @@ local function check(value, message)
 end
 
 local frames, cvars, bindings = {}, {}, { Q = "STRAFELEFT", E = "STRAFERIGHT" };
+-- Classic named-frame publication can replace a global; the inspected benilla
+-- host preserves an existing global. The same unique control names fit both.
+local preserveNamedGlobals = arg and arg[1] == "preserve_named_globals";
 local physical, clientClock, gameRun = 0.125, 1000, 100;
 local wallOffset, missingWall, phase = 0, false, "playing";
 local counters = { measuredFormats = 0, hotkeyFormats = 0, bodyWrites = 0, controllerCalls = 0 };
@@ -91,7 +94,10 @@ local function stub(name, kind, parent)
     function frame:CreateFontString()
         local font = stub(nil, "FontString", self); table.insert(self.fonts, font); return font;
     end
-    if (name) then frames[name] = frame; _G[name] = frame; end
+    if (name) then
+        frames[name] = frame;
+        if (not preserveNamedGlobals or _G[name] == nil) then _G[name] = frame; end
+    end
     return frame;
 end
 
@@ -280,6 +286,8 @@ check(frames.AZSSpeedGearLightText:IsShown() and frames.AZSSpeedGearDiagnosticTo
     "optional controls are reachable in Details");
 check(type(AZSSpeedGearDiagnostics.NewRecorder) == "function",
     "named native widgets cannot replace the diagnostic module global");
+check(_G.AZSSpeedGearDiagnosticToggle == frames.AZSSpeedGearDiagnosticToggle,
+    "named control lookup publishes the actual toggle rather than a module");
 local beforeFlag = AZSSpeedGear.lightweightCombatText;
 KeijinUI = nil; click("AZSSpeedGearLightText");
 check(AZSSpeedGear.lightweightCombatText == beforeFlag, "missing Keijin cannot claim an active display mode");
