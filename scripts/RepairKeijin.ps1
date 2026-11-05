@@ -7,7 +7,8 @@ param(
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $originalSHA='16d058315a36f1dd48be8240c5b776924a3901b0ab80ae62b39f697bedd3f141'
-$repairedSHA='c38f46e994a6d60632bedd3c29408d4f5d2bef423435c58f6800d793e7fd651b'
+$previousSHA='c38f46e994a6d60632bedd3c29408d4f5d2bef423435c58f6800d793e7fd651b'
+$repairedSHA='6ad0299f392cbe384af9ab88564cbaf1cc9f72820a2d384202973a0407cdb4e5'
 $sourceVersion='4.6.1-damageonly.1'
 $utf8=New-Object Text.UTF8Encoding($false,$true)
 function Get-SHA256([byte[]]$Bytes) {
@@ -71,10 +72,10 @@ if((Get-Item -LiteralPath $target).Length -gt 256KB) { throw 'KeijinUI source ex
 $originalBytes=[IO.File]::ReadAllBytes($target)
 $actualSHA=Get-SHA256 $originalBytes
 if($actualSHA -ceq $repairedSHA) {
-    [pscustomobject]@{Changed=$false;SourcePath=$target;SourceVersion=$sourceVersion;RepairRevision=1;SHA256=$actualSHA;BackupDirectory=$null}
+    [pscustomobject]@{Changed=$false;SourcePath=$target;SourceVersion=$sourceVersion;RepairRevision=2;SHA256=$actualSHA;BackupDirectory=$null}
     return
 }
-if($actualSHA -cne $originalSHA) { throw "Unsupported KeijinUI source SHA256 $actualSHA; no source was changed." }
+if($actualSHA -cne $originalSHA -and $actualSHA -cne $previousSHA) { throw "Unsupported KeijinUI source SHA256 $actualSHA; no source was changed." }
 $text=$utf8.GetString($originalBytes)
 
 # Small source transformations only. Full third-party source and assets are not
@@ -140,8 +141,159 @@ $newMerge=@'
                 prior.fs:SetText(mergedText);prior.azsgText=mergedText
 '@
 $updated=$text
+if($actualSHA -ceq $originalSHA) {
 foreach($pair in @(@($oldMarker,$newMarker),@($oldFont,$newFont),@($oldGlobals,$newGlobals),@($oldUiScale,$newUiScale),@($oldFootprint,$newFootprint),@($oldAdd,$newAdd),@($oldLimit,$newLimit),@($oldItem,$newItem),@($oldMerge,$newMerge))) {
     if(([regex]::Matches($updated,[regex]::Escape($pair[0]))).Count -ne 1) { throw 'Pinned source layout changed; no source was changed.' }
+    $updated=$updated.Replace($pair[0],$pair[1])
+}
+    if((Get-SHA256 ($utf8.GetBytes($updated))) -cne $previousSHA) { throw 'First-stage Keijin identity mismatch.' }
+}
+
+# Revision 2: reuse borrowed frame buffers and coalesce presentation work.
+$oldFrameWork0=@'
+K.damageText={active=active}
+K.damageText.azsgPerformanceRevision=1
+local function Take()
+    local fs=table.remove(pool)
+
+'@
+$newFrameWork0=@'
+K.damageText={active=active}
+K.damageText.azsgPerformanceRevision=1
+K.damageText.azsgFrameWorkRevision=1
+local function Take()
+    local fs=table.remove(pool)
+
+'@
+$oldFrameWork1=@'
+-- a frame (an enemy standing behind it) is moved up to just above its top edge, the numbers only rise.
+local tickRects,azsgUiScale
+local function Rectangles()
+    local result={}
+    local frames={K.units and K.units.player,K.units and K.units.target,
+        getglobal("KeijinUISkills"),getglobal("KeijinUITally"),getglobal("KeijinUIResources"),getglobal("KeijinUIStoredLevels")}
+    local ui=UIParent:GetEffectiveScale()
+    azsgUiScale=ui
+    for _,f in pairs(frames) do
+        if f.IsShown and f:IsShown() and f.GetLeft and f:GetAlpha()>0 then
+            local l,b,r,t=f:GetLeft(),f:GetBottom(),f:GetRight(),f:GetTop()
+            local ratio=f:GetEffectiveScale()/ui
+            if K.Number(l) and K.Number(b) and K.Number(r) and K.Number(t) then
+                table.insert(result,{l*ratio,b*ratio,r*ratio,t*ratio})
+            end
+        end
+    end
+    return result
+end
+local function KeepClear(x,y,halfWidth,height)
+
+'@
+$newFrameWork1=@'
+-- a frame (an enemy standing behind it) is moved up to just above its top edge, the numbers only rise.
+local tickRects,azsgUiScale
+local rectBuffer,rectPool,rectFrames={},{},{}
+local rectCount=0
+local anchorX,anchorY,anchorSeen={},{},{}
+local function ClearAnchors()
+    for name in pairs(anchorSeen) do
+        anchorSeen[name]=nil;anchorX[name]=nil;anchorY[name]=nil
+    end
+end
+local function Rectangles()
+    rectFrames[1]=K.units and K.units.player;rectFrames[2]=K.units and K.units.target
+    rectFrames[3]=getglobal("KeijinUISkills");rectFrames[4]=getglobal("KeijinUITally")
+    rectFrames[5]=getglobal("KeijinUIResources");rectFrames[6]=getglobal("KeijinUIStoredLevels")
+    local ui=UIParent:GetEffectiveScale()
+    azsgUiScale=ui
+    local count=0
+    for index=1,6 do
+        local f=rectFrames[index];rectFrames[index]=nil
+        if f and f.IsShown and f:IsShown() and f.GetLeft and f:GetAlpha()>0 then
+            local l,b,r,t=f:GetLeft(),f:GetBottom(),f:GetRight(),f:GetTop()
+            local ratio=f:GetEffectiveScale()/ui
+            if K.Number(l) and K.Number(b) and K.Number(r) and K.Number(t) then
+                count=count+1
+                local row=rectPool[count]
+                if not row then row={};rectPool[count]=row end
+                row[1],row[2],row[3],row[4]=l*ratio,b*ratio,r*ratio,t*ratio
+                rectBuffer[count]=row
+            end
+        end
+    end
+    for index=count+1,rectCount do rectBuffer[index]=nil end
+    rectCount=count
+    return rectBuffer
+end
+local function KeepClear(x,y,halfWidth,height)
+
+'@
+$oldFrameWork2=@'
+    local dt=tonumber(arg1) or 0
+    tickRects=Rectangles()
+    local anchors={}   -- plate anchor per name, asked once per tick
+    local i=1
+    while i<=table.getn(active) do
+
+'@
+$newFrameWork2=@'
+    local dt=tonumber(arg1) or 0
+    tickRects=Rectangles()
+    ClearAnchors()
+    local i=1
+    while i<=table.getn(active) do
+
+'@
+$oldFrameWork3=@'
+            if item.scroll then
+                if item.name then
+                    local a=anchors[item.name]
+                    if a==nil then
+                        local ax,ay=K.PlateAnchor(item.name)
+                        a=ax and {ax,ay} or false; anchors[item.name]=a
+                    end
+                    if a then
+                        local dx,dy=a[1]-item.ax,a[2]-item.ay
+                        if dx*dx+dy*dy<=FOLLOW_JUMP*FOLLOW_JUMP then
+                            item.ax,item.ay=a[1],a[2]
+                            item.x0,item.y0=a[1]+item.ox,a[2]+item.oy
+                        end
+                    end
+
+'@
+$newFrameWork3=@'
+            if item.scroll then
+                if item.name then
+                    if not anchorSeen[item.name] then
+                        local ax,ay=K.PlateAnchor(item.name)
+                        anchorSeen[item.name]=true;anchorX[item.name]=ax;anchorY[item.name]=ay
+                    end
+                    local ax,ay=anchorX[item.name],anchorY[item.name]
+                    if ax then
+                        local dx,dy=ax-item.ax,ay-item.ay
+                        if dx*dx+dy*dy<=FOLLOW_JUMP*FOLLOW_JUMP then
+                            item.ax,item.ay=ax,ay
+                            item.x0,item.y0=ax+item.ox,ay+item.oy
+                        end
+                    end
+
+'@
+$oldFrameWork4=@'
+    end
+    tickRects=nil
+end)
+K.On("PLAYER_ENTERING_WORLD",function() average=nil end,"combatText")
+
+'@
+$newFrameWork4=@'
+    end
+    tickRects=nil
+    ClearAnchors()
+end)
+K.On("PLAYER_ENTERING_WORLD",function() average=nil end,"combatText")
+
+'@
+foreach($pair in @(@($oldFrameWork0,$newFrameWork0),@($oldFrameWork1,$newFrameWork1),@($oldFrameWork2,$newFrameWork2),@($oldFrameWork3,$newFrameWork3),@($oldFrameWork4,$newFrameWork4))) {
+    if(([regex]::Matches($updated,[regex]::Escape($pair[0]))).Count -ne 1) { throw 'Pinned frame-work layout changed; no source was changed.' }
     $updated=$updated.Replace($pair[0],$pair[1])
 }
 $updatedBytes=$utf8.GetBytes($updated)
@@ -165,4 +317,4 @@ try {
 } finally {
     if(Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
 }
-[pscustomobject]@{Changed=$true;SourcePath=$target;SourceVersion=$sourceVersion;RepairRevision=1;OriginalSHA256=$actualSHA;SHA256=$repairedSHA;BackupDirectory=$backupRoot}
+[pscustomobject]@{Changed=$true;SourcePath=$target;SourceVersion=$sourceVersion;RepairRevision=2;OriginalSHA256=$actualSHA;SHA256=$repairedSHA;BackupDirectory=$backupRoot}
