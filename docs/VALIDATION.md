@@ -1,5 +1,28 @@
 # Validation — updated 2026-11-05
 
+## Version 0.7.7 floating text, panel budget and bounded diagnostics
+
+Remote pre-fix run `41874632910` failed the actual-source Keijin regression:
+unchanged labels continued measuring width on every animation update. The
+repaired source in `41875806166` passed 40 checks and reduced 100 repeated width
+reads to zero without substituting native text/font reads. It covers geometry,
+merges, font/size/scale changes, pool reuse, invalid widths and explicit opt-in
+24-label/fixed-size behavior. The same run exposed hidden body formatting in
+the unmodified SpeedGear driver, establishing the second pre-fix signal.
+
+Combined checks exercise the actual driver, controller and recorder with
+independent wall seconds, client-clock scale and callback cadence. They must
+preserve immediate key/stop/state updates and the exact 250ms / three-update
+guard. Recorder fixtures cover bounded rings and export copies, default-off
+behavior, clock domains, reason attribution and faults that must not interfere
+with control. Remote final-source and actual-client results are pending.
+
+No local test, build, game, external capture or benchmark is authorized or
+performed for this change. Existing private game resources and their pinned
+delta are reused for disposable current-client checks; no new full-game upload
+is needed. Operation-count and functional smoke results do not establish the
+cause or full resolution of the previously reported later-run slowdown.
+
 ## Version 0.7.6 hidden presentation work and current runtime limits
 
 The 0.7.5 repair removed hidden widget painting, but still ran the full row

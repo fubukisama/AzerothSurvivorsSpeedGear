@@ -7,7 +7,7 @@ verified 4.6.1 damage-only integration and backs up its source. Light text is of
 by default; it limits new labels to 24 and disables their size-pop animation.
 Statistics collection and the original display settings remain intact.
 
-Hidden speed panels skip body formatting. Visible numeric text has an eight
+Hidden speed panels skip body formatting. Ordinary visible numeric text has an eight
 updates-per-independent-wall-second budget, paced using recent callback counts;
 important state changes, input and the per-update guard remain immediate.
 An opt-in bounded diagnostic recorder preserves controller timings and explicit

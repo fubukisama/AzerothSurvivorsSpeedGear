@@ -1284,6 +1284,7 @@ layoutPanel = function()
                 y = y + rowHeight + gap; x = padding; rowHeight = 0;
             end
             placeWidget(button, x, y, bw, bh);
+            button:Show();
             x = x + bw + gap; rowHeight = math.max(rowHeight, bh);
         end
         return y + rowHeight;

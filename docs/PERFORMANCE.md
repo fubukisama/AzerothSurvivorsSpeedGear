@@ -36,6 +36,48 @@ the whole game again. Structural compatibility alone is not a gameplay or
 performance result. Historical 0.131.0/0.140.0 observations remain scoped to
 their recorded identities.
 
+## Version 0.7.7 targeted reductions
+
+The Keijin 4.6.1 damage-only integration has a repeated width-measurement path
+in each live label's `Footprint()`. Remote pre-fix run `41874632910` exercised
+the actual source and counted 100 width reads for 100 unchanged animation
+updates. Run `41875806166` passed the repaired source's 40 checks, including
+zero width/text/font reads over the same stable updates, merged numbers,
+font/size/scale invalidation, pool reuse and unavailable-width recovery.
+These are API call counts and geometry checks, not measured game FPS.
+
+The guarded repair accepts only source SHA-256
+`16d058315a36f1dd48be8240c5b776924a3901b0ab80ae62b39f697bedd3f141`
+with TOC version `4.6.1-damageonly.1`, and produces
+`c38f46e994a6d60632bedd3c29408d4f5d2bef423435c58f6800d793e7fd651b`.
+It backs up the exact input and refuses unknown source variants. The full addon
+is not redistributed. Remote fixtures derive the existing integration from
+pinned upstream commit `df61ac35119f099786676774a4075f80f5ea8f03`.
+
+An opt-in light-text control under Details limits new labels to 24 and disables
+their size-pop animation. Default behavior remains the existing 60-label limit
+and animation. Statistics collection and event attribution are not changed.
+The control requires the compatible repair's runtime marker; it does not
+silently claim to work with an unmodified or missing Keijin addon.
+
+The old SpeedGear body also failed the hidden-formatting regression in remote
+run `41875806166`. The revised driver keeps control and protection per update,
+but skips hidden body formatting, changes captions only when primitive state
+changes, and budgets ordinary numeric presentation to eight updates per
+independent integer-wall-second bucket. Recent actual callback counts spread
+that budget; it is not a new subsecond clock and is never inferred by dividing
+by the target multiplier. Important input/state changes remain immediate. An
+unavailable wall clock uses a bounded callback stride instead of a wall-rate
+claim. Final combined validation is recorded in VALIDATION.md.
+
+The optional bounded recorder in [DIAGNOSTICS.md](DIAGNOSTICS.md) separates
+manual, phase, guard and failure events and preserves a short guard window.
+It starts off on each launch, uses fixed-capacity storage and reuses existing
+clock/raw observations. It does not launch external collectors or certify real
+render FPS. The existing 0.25-second / three-consecutive-update frame guard and
+native clock algorithms are unchanged. The complete later-run combat slowdown
+remains unresolved until matched frame/thread evidence establishes its cause.
+
 ## Version 0.7.6: remaining presentation work
 
 The user reported that 0.7.5 improved initial performance and delayed the

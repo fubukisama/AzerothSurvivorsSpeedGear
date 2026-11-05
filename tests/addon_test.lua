@@ -305,6 +305,7 @@ local function frameStub(name)
     function frame:ClearFocus() end
     function frame:Show() self.shown = true; end
     function frame:Hide() self.shown = false; end
+    function frame:IsShown() return self.shown; end
     function frame:CreateFontString()
         local font = frameStub();
         table.insert(self.fontStrings, font);
@@ -548,8 +549,10 @@ check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == 
 advanceUI(2, 2);
 check(AZSSpeedGear.controller.measured and AZSSpeedGear.controller.confirmedSpeed100 == nil
     and not AZSSpeedGear.controller.measurementMismatch, "wide interval remains uncertain even when its point estimate matches x2");
+SlashCmdList.AZSSPEEDGEAR("show");
 check(hasPanelText(string.format(AZSSpeedGearI18n.Text("target_wait"), "2"))
     and not hasPanelText(AZSSpeedGearI18n.Text("below_target")), "uncertainty is shown as measuring rather than a false speed mismatch");
+SlashCmdList.AZSSPEEDGEAR("hide");
 advanceUI(2, 2);
 check(AZSSpeedGear.controller.measured and math.abs(AZSSpeedGear.controller.measured - 2) < 0.05, "launcher x2 confirmation uses independent raw progress");
 check(not AZSSpeedGear.panel.shown and AZSSpeedGear.launcher.text == launcherCaption .. " ×2",
@@ -623,6 +626,7 @@ local requestedAt = wall;
 SlashCmdList.AZSSPEEDGEAR("5");
 check(table.getn(writes) == writesBeforeRequest + 1, "speed request writes CVar without waiting for the measurement window");
 local switchingNotice = nil;
+SlashCmdList.AZSSPEEDGEAR("show");
 local noticeIndex = 1;
 while (noticeIndex <= table.getn(AZSSpeedGear.panel.fontStrings)) do
     local label = AZSSpeedGear.panel.fontStrings[noticeIndex];
@@ -630,13 +634,16 @@ while (noticeIndex <= table.getn(AZSSpeedGear.panel.fontStrings)) do
     noticeIndex = noticeIndex + 1;
 end
 check(switchingNotice ~= nil, "unconfirmed request retains a visible switching notice");
+SlashCmdList.AZSSPEEDGEAR("hide");
 sampleBaseline(1, 5);
 check(AZSSpeedGear.controller.measured == nil and AZSSpeedGear.launcher.text == targetCaption("5"),
     "baseline x5 remains pending after one integer clock tick");
 sampleBaseline(3, 5);
 check(AZSSpeedGear.controller.measured and math.abs(AZSSpeedGear.controller.measured - 5) < 0.05 and AZSSpeedGear.launcher.text == baselineCaption .. " ×5",
     "x5 confirms only after a sufficiently bounded raw observation window");
-check(switchingNotice.text == AZSSpeedGearI18n.Text("hint"), "confirmed speed clears the stale switching notice even with panel hidden");
+SlashCmdList.AZSSPEEDGEAR("show");
+check(switchingNotice.text == AZSSpeedGearI18n.Text("hint"), "reopening after hidden confirmation clears the stale switching notice");
+SlashCmdList.AZSSPEEDGEAR("hide");
 print("BASELINE request->CVar=0 fixture ticks; request->launcher-confirm=" .. (wall - requestedAt)
     .. " integer seconds (perfect immediate x5 response; native latency not modeled)");
 
@@ -709,8 +716,10 @@ local writesWithoutConsole = table.getn(writes);
 advanceUI(5, 5);
 check(AZSSpeedGear.controller.bridgeReady and AZSSpeedGear.controller.active and table.getn(writes) == writesWithoutConsole + 1,
     "missing ConsoleExec leaves the real production adapter's CVar fallback working");
+SlashCmdList.AZSSPEEDGEAR("show");
 check(AZSSpeedGear.controller.sendStatus == "file_only" and hasPanelText(AZSSpeedGearI18n.Text("send_file_only")),
-    "missing ConsoleExec refreshes sender capability while the panel is hidden");
+    "opening after missing ConsoleExec shows the current fallback capability");
+SlashCmdList.AZSSPEEDGEAR("hide");
 ConsoleExec = function() return false; end;
 advanceUI(1, 5);
 check(AZSSpeedGear.controller.sendStatus == "file_only" and AZSSpeedGear.controller.bridgeReady,
@@ -721,12 +730,14 @@ check(AZSSpeedGear.controller.sendStatus == "file_only" and AZSSpeedGear.control
     "production throwing ConsoleExec result preserves fallback state");
 ConsoleExec = function(command) table.insert(queries, command); end;
 advanceUI(1, 5);
+SlashCmdList.AZSSPEEDGEAR("show");
 check(AZSSpeedGear.controller.sendStatus == "instant_attempt" and hasPanelText(AZSSpeedGearI18n.Text("send_instant_attempt")),
     "successful later pulse refreshes sender capability without claiming backend connection");
 AZSSpeedGearNativeLocale = "ja";
 advanceUI(1, 5);
 check(hasPanelText(AZSSpeedGearI18n.catalogs.ja.send_instant_attempt) and hasPanelText("AzerothSurvivorsSpeedGear"),
     "language change translates sender capability and keeps English project title");
+SlashCmdList.AZSSPEEDGEAR("hide");
 local statusMessages = {};
 DEFAULT_CHAT_FRAME = { AddMessage = function(self, text) table.insert(statusMessages, text); end };
 local beforeStatusWrites = table.getn(writes);
@@ -778,8 +789,8 @@ check(AZSSpeedGear.controller.speed100 == 100 and AZSSpeedGear.controller.desire
     "third slow production frame immediately requests active x1 through the real CVar adapter");
 check(AZSSpeedGear.controller.confirmedSpeed100 == nil and AZSSpeedGear.launcher.text == targetCaption("1"),
     "automatic restore immediately removes the old confirmed x2 without claiming unmeasured x1");
-check(hasPanelText(AZSSpeedGearI18n.Text("frame_guard")) and not AZSSpeedGear.panel.shown,
-    "hidden panel retains the localized reason for automatic restore");
+check(AZSSpeedGear.controller.frameGuardTripped and not AZSSpeedGear.panel.shown,
+    "hidden panel retains the guard state without requiring hidden text repaint");
 check(table.getn(guardMessages) == 1
     and string.find(guardMessages[1], AZSSpeedGearI18n.Text("frame_guard"), 1, true) ~= nil,
     "automatic restore gives exactly one localized chat notice while the panel is hidden");

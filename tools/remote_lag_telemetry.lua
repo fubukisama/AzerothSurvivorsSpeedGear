@@ -1,6 +1,8 @@
 -- Disposable remote-client observation only; never included in a release.
 -- The private harness must prepend AZSG_LAG_PROBE_REMOTE = true.
 -- No damage is injected, and no game/speed/protection setting is changed.
+-- Only the explicitly selected optimized remote case enables the two new
+-- presentation/diagnostic features. Baseline cases keep their default state.
 -- Native call counters include wrapper overhead; trusted elapsed time belongs
 -- to the external parent process, not GetTime/QPC or callback milliseconds.
 if (AZSG_LAG_PROBE_REMOTE ~= true) then return; end
@@ -12,6 +14,7 @@ local S = {
     activePeak = 0, hookedWidths = 0, hookedFonts = 0, unsupported = 0,
     preexisting = 0, observerReads = 0, requestedSizes = {}, actualSizes = {},
     requestedCount = 0, actualCount = 0, sizeOverflow = 0,
+    diagnosticGuardEvents = -1, diagnosticNativeReceipt = -1,
     labels = setmetatable({}, { __mode = "k" }),
 };
 local function increment(key, value)
@@ -178,6 +181,64 @@ local function worldCounts()
     end
     return count, shown, regions, 0;
 end
+local function installOptimizedFeatures()
+    if (AZSG_LAG_OPTIMIZED_REMOTE ~= true or S.featureAttempted) then return; end
+    local gear = AZSSpeedGear;
+    local controller = type(gear) == "table" and gear.controller;
+    if (type(controller) ~= "table" or controller.active ~= true) then return; end
+    S.featureAttempted = true;
+    gear.lightweightCombatText = true;
+    if (type(AZSSpeedGearDB) == "table") then AZSSpeedGearDB.lightweightCombatText = true; end
+    if (type(controller.SetDiagnosticsEnabled) == "function") then
+        pcall(controller.SetDiagnosticsEnabled, controller, true);
+    end
+end
+local function diagnosticFeatures(controller, phase)
+    local marker = 0;
+    if (type(KeijinUI) == "table" and type(KeijinUI.damageText) == "table") then
+        local revision = KeijinUI.damageText.azsgPerformanceRevision;
+        if (revision ~= nil) then marker = revision == 1 and 1 or -1; end
+    end
+    local lite = type(AZSSpeedGear) == "table" and AZSSpeedGear.lightweightCombatText == true
+        and type(AZSSpeedGearDB) == "table" and AZSSpeedGearDB.lightweightCombatText == true;
+    local enabled, frameCount, eventCount, frozen = -1, -1, -1, -1;
+    if (type(controller.DiagnosticsEnabled) == "function") then
+        local okay, value = pcall(controller.DiagnosticsEnabled, controller);
+        if (okay and type(value) == "boolean") then enabled = value and 1 or 0; end
+    end
+    if (type(controller.DiagnosticCounts) == "function") then
+        local okay, frames, events, isFrozen = pcall(controller.DiagnosticCounts, controller);
+        if (okay) then
+            frameCount, eventCount = number(frames), number(events);
+            if (type(isFrozen) == "boolean") then frozen = isFrozen and 1 or 0; end
+        end
+    end
+    -- Export copies bounded buffers, so never call it on every frame/second.
+    -- One guard/freeze snapshot and one terminal-phase snapshot are sufficient
+    -- to prove the reason/domain; only aggregate counts leave the observer.
+    local guardSnapshot = (controller.frameGuardTripped == true or frozen == 1) and not S.exportedGuard;
+    local phaseSnapshot = S.featureAttempted and phase ~= "playing" and not S.exportedPhase;
+    if (AZSG_LAG_OPTIMIZED_REMOTE == true and enabled == 1 and (guardSnapshot or phaseSnapshot)) then
+        if (guardSnapshot) then S.exportedGuard = true; end
+        if (phaseSnapshot) then S.exportedPhase = true; end
+        if (type(controller.ExportDiagnostics) == "function") then
+            local okay, report = pcall(controller.ExportDiagnostics, controller);
+            if (okay and type(report) == "table" and type(report.events) == "table") then
+                local count = 0;
+                for index = 1, math.min(64, table.getn(report.events)) do
+                    local item = report.events[index];
+                    if (type(item) == "table" and item.reason == "frame_guard") then count = count + 1; end
+                end
+                S.diagnosticGuardEvents = count;
+                if (report.nativeReceiptAvailable == false) then S.diagnosticNativeReceipt = 0;
+                elseif (report.nativeReceiptAvailable == true) then S.diagnosticNativeReceipt = 1;
+                else S.diagnosticNativeReceipt = -1; end
+            end
+        end
+    end
+    return marker, lite and 1 or 0, enabled, frameCount, eventCount, frozen,
+        S.diagnosticGuardEvents, S.diagnosticNativeReceipt;
+end
 local function emit(now)
     if (not S.registered or type(SetCVar) ~= "function" or type(ConsoleExec) ~= "function") then return; end
     local total, totalShown, enumCapped = frameCounts();
@@ -191,6 +252,8 @@ local function emit(now)
     local phase = safe(AZS_GetPhase);
     if (type(phase) ~= "string" or not string.find(phase, "^[a-z_]+$") or string.len(phase) > 24) then phase = "unknown"; end
     local controller = AZSSpeedGear and AZSSpeedGear.controller or {};
+    local marker, lite, diagnosticEnabled, diagnosticFrames, diagnosticEvents, diagnosticFrozen,
+        diagnosticGuardEvents, diagnosticNativeReceipt = diagnosticFeatures(controller, phase);
     local meterRows, meterTotal = -1, -1;
     if (type(AZS_GetMeter) == "function") then
         local okay, rows, total = pcall(AZS_GetMeter);
@@ -203,7 +266,9 @@ local function emit(now)
         children, childShown, regions, worldCapped, total, totalShown, enumCapped,
         S.observerReads, number(controller.desiredSpeed100), number(controller.speed100),
         controller.frameGuardTripped and 1 or 0, memory, threshold, now < 0 and 1 or 0,
-        S.updateHook or 0, S.createHook or 0, S.versionUnsupported or 0, meterRows, meterTotal };
+        S.updateHook or 0, S.createHook or 0, S.versionUnsupported or 0, meterRows, meterTotal,
+        marker, lite, diagnosticEnabled, diagnosticFrames, diagnosticEvents, diagnosticFrozen,
+        diagnosticGuardEvents, diagnosticNativeReceipt };
     for index = 1, table.getn(fields) do
         if (type(fields[index]) == "number") then fields[index] = string.format("%.0f", number(fields[index])); end
     end
@@ -214,7 +279,14 @@ frame:RegisterEvent("ADDON_LOADED");
 frame:SetScript("OnEvent", install);
 frame:SetScript("OnUpdate", function()
     increment("frames"); install();
+    installOptimizedFeatures();
     local now = number(safe(time));
     if (now >= 0) then now = math.floor(now); end
-    if (now ~= S.lastWall) then S.lastWall = now; emit(now); end
+    local controller = AZSSpeedGear and AZSSpeedGear.controller or {};
+    local guard = controller.frameGuardTripped == true;
+    local phase = controller.phase;
+    local terminalChange = S.featureAttempted and S.lastPhase == "playing" and phase ~= "playing";
+    local guardChange = guard and not S.lastGuard;
+    S.lastGuard, S.lastPhase = guard, phase;
+    if (now ~= S.lastWall or terminalChange or guardChange) then S.lastWall = now; emit(now); end
 end);
