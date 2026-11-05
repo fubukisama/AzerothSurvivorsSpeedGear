@@ -625,6 +625,8 @@ local function registerBridge()
 end
 
 local worldActive = false;
+-- Borrowed by Measure(), which copies scalar values and never retains a packet.
+local rawRunSnapshot = {};
 local controller = Gear.NewController({
     now = function() if (type(time) == "function") then return time(); end end,
     random = function() return math.random(1, 999); end,
@@ -633,7 +635,11 @@ local controller = Gear.NewController({
     runTime = function() if (type(AZS_GetRunTime) == "function") then return AZS_GetRunTime(); end end,
     clientClock = function() if (type(GetTime) == "function") then return GetTime(); end end,
     rawRunSample = function()
-        if (type(AZS_RUN) == "table") then return { t = AZS_RUN.t, updated = AZS_RUN_UPDATED }; end
+        if (type(AZS_RUN) ~= "table") then
+            rawRunSnapshot.t = nil; rawRunSnapshot.updated = nil; return nil;
+        end
+        rawRunSnapshot.t = AZS_RUN.t; rawRunSnapshot.updated = AZS_RUN_UPDATED;
+        return rawRunSnapshot;
     end,
     register = registerBridge,
     send = function(command) SetCVar(COMMAND_CVAR, command); return true; end,

@@ -73,10 +73,10 @@ local function upvalue(fn,wanted)
     end
 end
 local Add=upvalue(K.damageText.Spawn,"Add");
-local Place=upvalue(Add,"Place");
+local driver=assert(frames.KeijinUIDamageText,"production animation host");
+local Place=upvalue(driver.scripts.OnUpdate,"Place");
 local Footprint=upvalue(Place,"Footprint");
 local SetSize=upvalue(Add,"SetSize");
-local driver=assert(frames.KeijinUIDamageText,"production animation host");
 local function check(okay,description)
     checks=checks+1;
     if not okay then table.insert(failures,description);print("FAIL: "..description); end
@@ -88,7 +88,7 @@ end
 local function one() return assert(K.damageText.active[1],"active production item"); end
 local function stop() K.damageText.Stop();end
 local function spawn(amount,crit,spell)
-    K.damageText.Spawn(amount,crit,"Target","Fire",false,spell or "FixtureSpell");return one();
+    K.damageText.Spawn(amount,crit,"Target","Fire",false,spell or "FixtureSpell");tick(1,0);return one();
 end
 
 check(K.damageText.azsgPerformanceRevision==1,"patched source advertises its compatible performance revision");

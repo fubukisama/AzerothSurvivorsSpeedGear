@@ -48,11 +48,11 @@ function Get-LagFeatureSmoke([object[]]$Rows,[string]$Variant,[bool]$GuardObserv
     if($null -eq $Rows){$Rows=@()}
     $optimized=$Variant -ceq 'all_repaired'
     $apiMissing=@($Rows | Where-Object{$null -eq $_.diagnosticsEnabled -or $null -eq $_.diagnosticFrameCount -or $null -eq $_.diagnosticEventCount -or $null -eq $_.diagnosticFrozen -or $_.diagnosticsEnabled -lt 0 -or $_.diagnosticFrameCount -lt 0 -or $_.diagnosticEventCount -lt 0 -or $_.diagnosticFrozen -lt 0})
-    $outOfBounds=@($Rows | Where-Object{$_.diagnosticFrameCount -gt 128 -or $_.diagnosticEventCount -gt 64 -or $_.diagnosticFrozen -notin @(0,1) -or $_.diagnosticsEnabled -notin @(0,1) -or $_.lightweightActive -notin @(0,1) -or $_.keijinPerformance -notin @(0,1) -or $_.diagnosticGuardEvents -lt -1 -or $_.diagnosticGuardEvents -gt 64})
+    $outOfBounds=@($Rows | Where-Object{$_.diagnosticFrameCount -gt 128 -or $_.diagnosticEventCount -gt 64 -or $_.diagnosticFrozen -notin @(0,1) -or $_.diagnosticsEnabled -notin @(0,1) -or $_.lightweightActive -notin @(0,1) -or $_.keijinPerformance -notin @(0,1,2) -or $_.diagnosticGuardEvents -lt -1 -or $_.diagnosticGuardEvents -gt 64})
     # -1 means no valid bounded Export snapshot has been observed. 0 means the
     # snapshot explicitly states false. 1 would incorrectly claim native data.
     $wrongDomain=@($Rows | Where-Object{$_.diagnosticNativeReceiptAvailable -notin @(-1,0) -or ($_.diagnosticGuardEvents -ge 0 -and $_.diagnosticNativeReceiptAvailable -ne 0)})
-    $ready=@($Rows | Where-Object{$_.keijinPerformance -eq 1 -and $_.lightweightActive -eq 1 -and $_.diagnosticsEnabled -eq 1 -and $_.diagnosticFrameCount -gt 0 -and $_.diagnosticEventCount -gt 0})
+    $ready=@($Rows | Where-Object{$_.keijinPerformance -eq 2 -and $_.lightweightActive -eq 1 -and $_.diagnosticsEnabled -eq 1 -and $_.diagnosticFrameCount -gt 0 -and $_.diagnosticEventCount -gt 0})
     $guardReasons=@($Rows | Where-Object{$_.diagnosticGuardEvents -gt 0 -and $_.diagnosticNativeReceiptAvailable -eq 0})
     $notDefault=@($Rows | Where-Object{$_.keijinPerformance -ne 0 -or $_.lightweightActive -ne 0 -or $_.diagnosticsEnabled -ne 0 -or $_.diagnosticFrameCount -ne 0 -or $_.diagnosticEventCount -ne 0 -or $_.diagnosticFrozen -ne 0})
     $status='passed';$reason=if($optimized){'optimized_features_observed_not_a_performance_verdict'}else{'default_features_remain_off'}
@@ -69,7 +69,7 @@ function Get-LagFeatureSmoke([object[]]$Rows,[string]$Variant,[bool]$GuardObserv
         rows=$Rows.Count;optimizedReadyRows=$ready.Count;guardObserved=$GuardObserved;
         guardReasonRows=$guardReasons.Count;apiMissingRows=$apiMissing.Count;
         outOfBoundsRows=$outOfBounds.Count;wrongNativeDomainRows=$wrongDomain.Count;
-        unexpectedDefaultRows=$notDefault.Count;frameCapacity=128;eventCapacity=64;
+        unexpectedDefaultRows=$(if($optimized){0}else{$notDefault.Count});frameCapacity=128;eventCapacity=64;requiredOptimizedKeijinLevel=2;
         nativeReceiptFlagMeaning='-1: no valid Export snapshot observed; 0: snapshot explicitly states unavailable/false; 1: invalid native-receipt claim';
         scope='Feature integration smoke only. Counts and a frame_guard reason do not establish frame rate, movement equivalence, sustained acceleration or resolution of lag.'
     }
@@ -109,7 +109,7 @@ function Observe-Lag {
             $featureUntil=[AZSGRemoteGame]::Wall()+150000000L
             do {
                 Drain-Launcher
-                $ready=@($script:la.lagRows | Where-Object{$_.keijinPerformance -eq 1 -and $_.lightweightActive -eq 1 -and $_.diagnosticsEnabled -eq 1})
+                $ready=@($script:la.lagRows | Where-Object{$_.keijinPerformance -eq 2 -and $_.lightweightActive -eq 1 -and $_.diagnosticsEnabled -eq 1})
                 if($ready.Count -gt 0){break}
                 Start-Sleep -Milliseconds 50
             }while([AZSGRemoteGame]::Wall() -lt $featureUntil)

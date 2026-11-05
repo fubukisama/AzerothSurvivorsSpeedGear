@@ -1,5 +1,43 @@
 # Validation — updated 2026-11-05
 
+## Version 0.7.8 frame scratch and coalesced text
+
+Remote run `41985680779` reproduced allocator growth and repeated burst writes
+in the exact pinned 0.7.7 production closures. Scratch-only run `41986385404`
+passed all eight real-adapter checks and removed the stable-workload allocator
+growth while deliberately retaining the still-failing burst regression.
+Run `41987173732` then passed all 40 suites, including 24 new geometry,
+accounting, submission, expiry, icon, mode and pooling checks. A 100-hit burst
+submitted one final text/position/width operation instead of 100/102/100.
+
+Later coverage preserves the exact 0.12-second callback-based merge boundary,
+tests deployment through GamePath (including backups, settings, idempotence
+and refusal paths), and requires the new runtime frame-work marker in the
+remote feature-smoke verdict. The existing controller/guard, hotkey, language
+and bounded diagnostic tests remain active. Remote run
+[41988965961](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41988965961)
+passed all 41 suites, including eight adapter, 25 frame-work and ten GamePath
+deployment checks. Original and 0.7.7 sources upgrade to identical verified
+bytes, and PowerShell 5.1 remains covered.
+
+Private current-client run `41989205351` passed all three functional smoke
+verdicts against source `56f68c5`. The opt-in case observed runtime frame-work
+level 2 in 74 ready samples, bounded diagnostics and real guard reasons; the
+two baseline cases retained their default-off behavior. The repair was applied
+through the real GamePath deployment mode before starting the disposable game.
+All three clients exited normally. The
+[curated summary](evidence/framework078.json) pins the raw report, source and
+unchanged resource-cache identities without publishing private files.
+
+Software-rendered runs ended at 84.66/67.72/81.14 game seconds. These functional
+observations do not establish matched long-run performance or explain the
+previously reported later slowdown. Native clocks and the exact guard contract
+are unchanged.
+
+No local test, benchmark, game or sampler is run for this change. Remote game
+checks reuse the existing private resource bundle and matching delta. They are
+functional checks and do not certify sustained 5x or late-run lag resolution.
+
 ## Version 0.7.7 floating text, panel budget and bounded diagnostics
 
 Remote pre-fix run `41874632910` failed the actual-source Keijin regression:

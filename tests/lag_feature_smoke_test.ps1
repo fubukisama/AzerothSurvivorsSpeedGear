@@ -5,7 +5,7 @@ if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows'){throw 'Rem
 $script:checks=0
 function Check([bool]$Condition,[string]$Message){$script:checks++;if(-not $Condition){throw $Message}}
 function Row([bool]$Optimized=$true){
-    [pscustomobject]@{keijinPerformance=$(if($Optimized){1}else{0});lightweightActive=$(if($Optimized){1}else{0});
+    [pscustomobject]@{keijinPerformance=$(if($Optimized){2}else{0});lightweightActive=$(if($Optimized){1}else{0});
         diagnosticsEnabled=$(if($Optimized){1}else{0});diagnosticFrameCount=$(if($Optimized){12}else{0});
         diagnosticEventCount=$(if($Optimized){3}else{0});diagnosticFrozen=0;
         diagnosticGuardEvents=$(if($Optimized){1}else{-1});diagnosticNativeReceiptAvailable=$(if($Optimized){0}else{-1})}
@@ -22,7 +22,7 @@ foreach($field in @('diagnosticFrameCount','diagnosticEventCount','diagnosticsEn
     $bad=Row;$bad.$field=-1
     Check ((Get-LagFeatureSmoke @($bad) 'all_repaired' $false).status -ceq 'blocked') 'Missing API evidence accepted'
 }
-foreach($entry in @(@('diagnosticFrameCount',129),@('diagnosticEventCount',65),@('diagnosticGuardEvents',65),@('diagnosticFrozen',2),@('diagnosticsEnabled',2),@('lightweightActive',2),@('keijinPerformance',2))){
+foreach($entry in @(@('diagnosticFrameCount',129),@('diagnosticEventCount',65),@('diagnosticGuardEvents',65),@('diagnosticFrozen',2),@('diagnosticsEnabled',2),@('lightweightActive',2),@('keijinPerformance',3))){
     $bad=Row;$bad.($entry[0])=$entry[1]
     Check ((Get-LagFeatureSmoke @($valid,$bad) 'all_repaired' $true).status -ceq 'failed') 'One valid row hid malformed feature evidence'
 }
@@ -32,6 +32,8 @@ $bad=Row;$bad.diagnosticGuardEvents=0
 Check ((Get-LagFeatureSmoke @($bad) 'all_repaired' $true).status -ceq 'failed') 'Guard observation without a reason was accepted'
 $bad=Row;$bad.keijinPerformance=0
 Check ((Get-LagFeatureSmoke @($bad) 'all_repaired' $false).status -ceq 'failed') 'Unpatched Keijin accepted as optimized'
+$bad=Row;$bad.keijinPerformance=1
+Check ((Get-LagFeatureSmoke @($bad) 'all_repaired' $false).status -ceq 'failed') 'Historical width-only repair accepted as frame-work repair'
 $names=@('seq','wallUnix','phase','frames','loaded','updates','widthCalls','fontCalls','spawns','misses',
     'activePeak','activeNow','hookedWidths','hookedFonts','unsupported','preexisting','requestedSizes','actualSizes',
     'sizeOverflow','worldChildren','worldShown','regions','worldCapped','totalFrames','framesShown','enumCapped',

@@ -90,6 +90,15 @@ jobs:
           if ((Get-FileHash (Join-Path $repair.BackupDirectory 'DamageText.lua')).Hash.ToLowerInvariant() -cne $repair.OriginalSHA256) { throw 'Keijin backup differs from input' }
           $again = ./scripts/RepairKeijin.ps1 -SourcePath $env:AZSG_KEIJIN_SOURCE
           if ($again.Changed -or $again.SHA256 -cne $repair.SHA256) { throw 'Keijin repair is not idempotent' }
+          $v1Script = Join-Path $env:RUNNER_TEMP 'RepairKeijin-v1.ps1'
+          Invoke-WebRequest 'https://raw.githubusercontent.com/fubukisama/AzerothSurvivorsSpeedGear/7fc003b490fc3f39879bb07774ff53b983fab446/scripts/RepairKeijin.ps1' -OutFile $v1Script -TimeoutSec 45
+          if ((Get-FileHash $v1Script).Hash.ToLowerInvariant() -cne '0885e61534ad0a64052d305fc600ff5a32959f5c2bcb4a5046a9402f0fd5d775') { throw 'Historical Keijin repair script identity mismatch' }
+          $upgrade = Join-Path $env:RUNNER_TEMP 'Keijin-upgrade.lua'
+          Copy-Item -LiteralPath $env:AZSG_KEIJIN_ORIGINAL -Destination $upgrade
+          & $v1Script -SourcePath $upgrade | Out-Null
+          $upgraded = ./scripts/RepairKeijin.ps1 -SourcePath $upgrade
+          if ($upgraded.OriginalSHA256 -cne 'c38f46e994a6d60632bedd3c29408d4f5d2bef423435c58f6800d793e7fd651b' -or (Get-FileHash $upgrade).Hash -cne (Get-FileHash $env:AZSG_KEIJIN_SOURCE).Hash) { throw 'Upgrading the installed Keijin repair differs from fresh repair' }
+          if ((Get-FileHash (Join-Path $upgraded.BackupDirectory 'DamageText.lua')).Hash.ToLowerInvariant() -cne $upgraded.OriginalSHA256) { throw 'Keijin upgrade backup differs from input' }
           $unknown = Join-Path $env:RUNNER_TEMP 'unknown-keijin.lua'
           [IO.File]::WriteAllText($unknown, '-- unsupported source')
           $before = (Get-FileHash $unknown).Hash
