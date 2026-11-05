@@ -98,10 +98,33 @@ writes=0;tick(.01);check(writes==0, "unchanged text is not rewritten on animatio
 K.damageText.Stop();hit(7);item=K.damageText.active[1];tick(2);
 check(item.fs.shown and table.getn(K.damageText.active)==1, "a new queued label gets its first presentation even after a long frame");
 tick(2);check(table.getn(K.damageText.active)==0, "presented labels still expire normally");
+hit(5);tick(0);hit(6);item=K.damageText.active[1];tick(2);
+check(item.fs.shown and item.fs.text=="11 x2", "a dirty aggregate is submitted once before hitch-driven retirement");
+hit(1);check(table.getn(K.damageText.active)==2, "an expiring final presentation is not reused as a merge target");
+tick(0);check(table.getn(K.damageText.active)==1, "a grace presentation retires on the next callback");
+K.damageText.Stop();
 hit(99);local cancelled=K.damageText.active[1];K.damageText.Stop();tick(0);
 check(not cancelled.fs.shown and table.getn(K.damageText.active)==0, "stop cancels pending labels without ghost painting");
 hit(3,"A");hit(4,"B","Other");tick(0);
 check(table.getn(K.damageText.active)==2, "unrelated abilities keep separate labels");
 K.damageText.Stop();
+-- An anchor is reused within one callback, then looked up afresh next time.
+db.combatTextMerge=false;db.combatTextPosition="plate";
+local plateX=700;K.PlateAnchor=function() plateCalls=plateCalls+1;return plateX,500 end;
+hit(1,"Moving","A");hit(2,"Moving","B");
+plateCalls=0;tick(0);
+check(plateCalls==1, "labels sharing one plate use one lookup in the animation callback");
+local moving=K.damageText.active[1];plateX=710;plateCalls=0;tick(.01);
+check(plateCalls==1 and moving.ax==710, "the next callback does not retain a stale anchor");
+K.damageText.Stop();db.combatTextMerge=true;db.combatTextPosition="fixed";
+local forwarded=0;
+K.damageText.list={On=function() return true end,PushDamage=function(amount) forwarded=forwarded+amount end};
+hit(3);hit(4);
+check(forwarded==7 and table.getn(K.damageText.active)==0, "list-mode damage forwarding remains immediate and separate");
+K.damageText.list=nil;db.combatTextIcons=true;
+hit(10);item=K.damageText.active[1];
+check(item.icon and not item.icon.shown, "a queued icon does not appear before its label");
+tick(0);check(item.icon.shown and item.fs.shown, "first submission presents label and icon together");
+K.damageText.Stop();check(not item.icon.shown and not item.fs.shown, "stop also hides the committed icon");
 print(string.format("Keijin frame work: %d checks, %d failures",checks,table.getn(failures)));
 if table.getn(failures)>0 then os.exit(1) end

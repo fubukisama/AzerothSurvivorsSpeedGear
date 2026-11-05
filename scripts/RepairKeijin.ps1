@@ -8,7 +8,7 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $originalSHA='16d058315a36f1dd48be8240c5b776924a3901b0ab80ae62b39f697bedd3f141'
 $previousSHA='c38f46e994a6d60632bedd3c29408d4f5d2bef423435c58f6800d793e7fd651b'
-$repairedSHA='6ad0299f392cbe384af9ab88564cbaf1cc9f72820a2d384202973a0407cdb4e5'
+$repairedSHA='41205f0dc3deff529cd5571358a820152cc9ef6918ee93d0aefc69a7f2bc1456'
 $sourceVersion='4.6.1-damageonly.1'
 $utf8=New-Object Text.UTF8Encoding($false,$true)
 function Get-SHA256([byte[]]$Bytes) {
@@ -228,22 +228,113 @@ local function KeepClear(x,y,halfWidth,height)
 
 '@
 $oldFrameWork2=@'
+    if pop then size=math.floor(size*PopFactor(0)+0.5) end
+    fs:SetTextColor(r,g,b)
+    fs:SetText(text)
+    fs:SetPoint("BOTTOM",UIParent,"BOTTOMLEFT",x,y)
+    fs:SetAlpha(1); fs:Show()
+    local item={fs=fs,x=x,y=y,x0=x,y0=y,age=0,style=style,scroll=scroll,pop=pop,scale=scale,tn=targetName,azsgText=text}
+    if icon then
+        local tex=table.remove(iconPool) or host:CreateTexture(nil,"OVERLAY")
+        tex:SetTexture(icon); tex:SetTexCoord(0.08,0.92,0.08,0.92)
+        tex:ClearAllPoints(); tex:SetPoint("RIGHT",fs,"LEFT",-ICON_GAP,0)
+        tex:SetAlpha(1); tex:Show()
+        item.icon=tex
+    end
+
+'@
+$newFrameWork2=@'
+    if pop then size=math.floor(size*PopFactor(0)+0.5) end
+    fs:SetTextColor(r,g,b)
+    fs:SetAlpha(1); fs:Hide()
+    local item={fs=fs,x=x,y=y,x0=x,y0=y,age=0,style=style,scroll=scroll,pop=pop,scale=scale,tn=targetName,
+        azsgText=text,azsgTextDirty=true,azsgPending=true}
+    if icon then
+        local tex=table.remove(iconPool) or host:CreateTexture(nil,"OVERLAY")
+        tex:SetTexture(icon); tex:SetTexCoord(0.08,0.92,0.08,0.92)
+        tex:ClearAllPoints(); tex:SetPoint("RIGHT",fs,"LEFT",-ICON_GAP,0)
+        tex:SetAlpha(1); tex:Hide()
+        item.icon=tex
+    end
+
+'@
+$oldFrameWork3=@'
+    end
+    table.insert(active,item)
+    fs:ClearAllPoints(); Place(item,x,y)
+    return item
+end
+
+'@
+$newFrameWork3=@'
+    end
+    table.insert(active,item)
+    return item
+end
+
+'@
+$oldFrameWork4=@'
+    if mode=="off" or mode=="native" or not K.Number(amount) or amount<=0 then return end
+    if K.damageText.list and K.damageText.list.On() then return K.damageText.list.PushDamage(amount,crit,targetName,school,periodic,spell) end
+    local text=string.format("%.0f",amount)
+    -- Merge a short burst of the same ability/kind, including area hits on
+    -- several enemies. Critical and ordinary hits always stay separate.
+
+'@
+$newFrameWork4=@'
+    if mode=="off" or mode=="native" or not K.Number(amount) or amount<=0 then return end
+    if K.damageText.list and K.damageText.list.On() then return K.damageText.list.PushDamage(amount,crit,targetName,school,periodic,spell) end
+    -- Merge a short burst of the same ability/kind, including area hits on
+    -- several enemies. Critical and ordinary hits always stay separate.
+
+'@
+$oldFrameWork5=@'
+        for i=table.getn(active),1,-1 do
+            local prior=active[i]
+            if prior.mergeKey==mergeKey and prior.age<=0.12 then
+                prior.amount=prior.amount+amount; prior.hits=(prior.hits or 1)+1
+                local mergedText=string.format("%.0f",prior.amount).." x"..prior.hits
+                prior.fs:SetText(mergedText);prior.azsgText=mergedText
+                if prior.targetName~=targetName then prior.name=nil end
+                prior.fs:ClearAllPoints(); Place(prior,prior.screenX or prior.x,prior.screenY or prior.y)
+                return
+            end
+        end
+    end
+    local small
+    if (mode=="scroll" or mode=="rise") and not crit and not periodic then
+
+'@
+$newFrameWork5=@'
+        for i=table.getn(active),1,-1 do
+            local prior=active[i]
+            if prior.mergeKey==mergeKey and prior.age<=0.12 and not prior.azsgRetire then
+                prior.amount=prior.amount+amount; prior.hits=(prior.hits or 1)+1
+                prior.azsgTextDirty=true
+                if prior.targetName~=targetName then prior.name=nil end
+                return
+            end
+        end
+    end
+    local text=string.format("%.0f",amount)
+    local small
+    if (mode=="scroll" or mode=="rise") and not crit and not periodic then
+
+'@
+$oldFrameWork6=@'
     local dt=tonumber(arg1) or 0
     tickRects=Rectangles()
     local anchors={}   -- plate anchor per name, asked once per tick
     local i=1
     while i<=table.getn(active) do
-
-'@
-$newFrameWork2=@'
-    local dt=tonumber(arg1) or 0
-    tickRects=Rectangles()
-    ClearAnchors()
-    local i=1
-    while i<=table.getn(active) do
-
-'@
-$oldFrameWork3=@'
+        local item=active[i]
+        item.age=item.age+dt
+        local s=item.style
+        local life=s.life
+        if item.age>=life then Give(table.remove(active,i))
+        else
+            local t=item.age/life
+            item.fs:ClearAllPoints()
             if item.scroll then
                 if item.name then
                     local a=anchors[item.name]
@@ -260,7 +351,31 @@ $oldFrameWork3=@'
                     end
 
 '@
-$newFrameWork3=@'
+$newFrameWork6=@'
+    local dt=tonumber(arg1) or 0
+    tickRects=Rectangles()
+    ClearAnchors()
+    local i=1
+    while i<=table.getn(active) do
+        local item=active[i]
+        local previousAge=item.age
+        if item.azsgPending then item.azsgPending=nil
+        else item.age=item.age+dt end
+        local s=item.style
+        local life=s.life
+        if item.azsgRetire or (item.age>=life and not item.azsgTextDirty) then Give(table.remove(active,i))
+        else
+            -- A hitch must not discard a fresh aggregate before its one final
+            -- presentation. It is ineligible for further merging and retires
+            -- on the next callback, so this does not grow the active pool.
+            if item.age>=life then item.age=previousAge;item.azsgRetire=true end
+            if item.azsgTextDirty then
+                local text=item.azsgText
+                if item.hits and item.hits>1 then text=string.format("%.0f",item.amount).." x"..item.hits end
+                item.fs:SetText(text);item.azsgText=text;item.azsgTextDirty=nil
+            end
+            local t=item.age/life
+            item.fs:ClearAllPoints()
             if item.scroll then
                 if item.name then
                     if not anchorSeen[item.name] then
@@ -277,14 +392,26 @@ $newFrameWork3=@'
                     end
 
 '@
-$oldFrameWork4=@'
+$oldFrameWork7=@'
+                item.fs:SetAlpha(K.damageText.Opacity(s,t))
+            end
+            i=i+1
+        end
     end
     tickRects=nil
 end)
 K.On("PLAYER_ENTERING_WORLD",function() average=nil end,"combatText")
 
 '@
-$newFrameWork4=@'
+$newFrameWork7=@'
+                item.fs:SetAlpha(K.damageText.Opacity(s,t))
+            end
+            if not item.azsgPresented then
+                item.fs:Show();if item.icon then item.icon:Show() end
+                item.azsgPresented=true
+            end
+            i=i+1
+        end
     end
     tickRects=nil
     ClearAnchors()
@@ -292,7 +419,7 @@ end)
 K.On("PLAYER_ENTERING_WORLD",function() average=nil end,"combatText")
 
 '@
-foreach($pair in @(@($oldFrameWork0,$newFrameWork0),@($oldFrameWork1,$newFrameWork1),@($oldFrameWork2,$newFrameWork2),@($oldFrameWork3,$newFrameWork3),@($oldFrameWork4,$newFrameWork4))) {
+foreach($pair in @(@($oldFrameWork0,$newFrameWork0),@($oldFrameWork1,$newFrameWork1),@($oldFrameWork2,$newFrameWork2),@($oldFrameWork3,$newFrameWork3),@($oldFrameWork4,$newFrameWork4),@($oldFrameWork5,$newFrameWork5),@($oldFrameWork6,$newFrameWork6),@($oldFrameWork7,$newFrameWork7))) {
     if(([regex]::Matches($updated,[regex]::Escape($pair[0]))).Count -ne 1) { throw 'Pinned frame-work layout changed; no source was changed.' }
     $updated=$updated.Replace($pair[0],$pair[1])
 }
