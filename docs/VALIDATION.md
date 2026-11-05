@@ -1,5 +1,51 @@
 # Validation — updated 2026-11-05
 
+## Version 0.7.7 floating text, panel budget and bounded diagnostics
+
+Remote pre-fix run `41874632910` failed the actual-source Keijin regression:
+unchanged labels continued measuring width on every animation update. The
+repaired source in `41875806166` passed 40 checks and reduced 100 repeated width
+reads to zero without substituting native text/font reads. It covers geometry,
+merges, font/size/scale changes, pool reuse, invalid widths and explicit opt-in
+24-label/fixed-size behavior. The same run exposed hidden body formatting in
+the unmodified SpeedGear driver, establishing the second pre-fix signal.
+
+Combined checks exercise the actual driver, controller and recorder with
+independent wall seconds, client-clock scale and callback cadence. They must
+preserve immediate key/stop/state updates and the exact 250ms / three-update
+guard. Recorder fixtures cover bounded rings and export copies, default-off
+behavior, clock domains, reason attribution and faults that must not interfere
+with control. Remote run
+[41969061978](https://github.com/fubukisama/AzerothSurvivorsSpeedGear/actions/runs/41969061978)
+passed all 37 suites: 120 UI refresh/control checks, 111 bounded-recorder checks,
+87 diagnostic/controller parity checks, 40 Keijin checks, 2,350 localization
+checks and 23 remote-evidence counterexamples, alongside the existing tests.
+Named widget lookup also has explicit regression coverage for both overwriting
+and preserving an existing global; the toggle name is separate from the module.
+
+Private real-client run `41968442466` used the existing base and verified delta,
+with feature source `7a32a7d`. All three feature-smoke verdicts passed. Two
+baseline cases retained recording and light-text defaults off. The optimized
+case observed the patched marker and explicit opt-ins, with 43 controller
+observations, six reason events, one recorded frame-guard reason and a frozen
+post-window, all within 128/64 bounds. Repeated telemetry rows carrying that
+same guard reason are not additional guard occurrences. The small
+[numerical summary](evidence/optimization077.json) pins the raw report digest
+without publishing game assets or user data.
+
+The smoke cases used software WARP, synthetic settings and no startup-updater
+DLL, ended at 78.00/87.50/79.53 game seconds, and do not establish sustained 5x
+or reproduction/resolution of the user's later-run slowdown. One baseline's
+normal-close wait timed out; the optimized and SpeedGear-only cases exited
+normally. The later production edit gives the diagnostic toggle a unique
+global name; controller, recorder and repair code remain the smoke-tested code.
+
+No local test, build, game, external capture or benchmark is authorized or
+performed for this change. Existing private game resources and their pinned
+delta are reused for disposable current-client checks; no new full-game upload
+is needed. Operation-count and functional smoke results do not establish the
+cause or full resolution of the previously reported later-run slowdown.
+
 ## Version 0.7.6 hidden presentation work and current runtime limits
 
 The 0.7.5 repair removed hidden widget painting, but still ran the full row

@@ -68,6 +68,9 @@ function Gear.NewController(api)
     self.frameGuardTripped = false;
     self.frameGuardClock = nil;
     self.frameGuardSlowFrames = 0;
+    -- This optional trace is inert until explicitly enabled. Cached clock/raw
+    -- observations are reused; tracing never calls an extra game/clock API.
+    local diagnostic = { enabled = false };
 
     local now = safeCall(api.now);
     local random = safeCall(api.random);
@@ -80,6 +83,131 @@ function Gear.NewController(api)
         local ok, result = pcall(api.register);
         self.bridgeReady = ok and result ~= false;
         if (self.bridgeReady) then self.sendStatus = "file_only"; end
+    end
+
+    local function diagnosticGate(now)
+        if (not self.bridgeReady) then return "channel_unavailable"; end
+        if (now == nil) then return "wall_clock_unavailable"; end
+        if (self.phase ~= "playing") then return "phase_suspend"; end
+        if (self.solo == false) then return "coop"; end
+        if (self.solo ~= true) then return "solo_unavailable"; end
+        return nil;
+    end
+
+    local function diagnosticContext(now, clock, beforeTarget, beforeRequest)
+        local context = diagnostic.context;
+        context.wallSecond = now; context.clientClock = clock;
+        -- These are the previous measurement's actual raw publication, not the
+        -- smooth run-time getter and not necessarily this Update's publication.
+        context.rawRunTime = self.rawRunValue; context.rawUpdated = self.rawRunUpdated;
+        context.phase = self.phase;
+        context.target100 = self.desiredSpeed100; context.requested100 = self.speed100;
+        context.active = self.active; context.guard = self.frameGuardTripped;
+        context.observedRunEstimate = self.measured;
+        context.guardSlowFrames = self.frameGuardSlowFrames;
+        context.beforeTarget100 = beforeTarget; context.beforeRequested100 = beforeRequest;
+        return context;
+    end
+
+    local function disableBrokenDiagnostic()
+        diagnostic.enabled = false;
+        if (diagnostic.recorder and type(diagnostic.recorder.SetEnabled) == "function") then
+            pcall(diagnostic.recorder.SetEnabled, diagnostic.recorder, false, diagnostic.context);
+        end
+    end
+
+    local function diagnosticEvent(reason, now, clock, beforeTarget, beforeRequest)
+        if (not diagnostic.enabled) then return; end
+        local context = diagnosticContext(now, clock, beforeTarget, beforeRequest);
+        local ok = pcall(diagnostic.recorder.Event, diagnostic.recorder, reason, context);
+        if (not ok) then disableBrokenDiagnostic(); end
+    end
+
+    local function diagnosticFrame(now, clock)
+        if (not diagnostic.enabled) then return; end
+        local context = diagnosticContext(now, clock);
+        local ok = pcall(diagnostic.recorder.Frame, diagnostic.recorder, context);
+        if (not ok) then disableBrokenDiagnostic(); return; end
+        local cause = nil;
+        if (not finiteNumber(clock) or clock <= 0) then cause = "client_clock_unavailable";
+        elseif (diagnostic.previousClock and clock < diagnostic.previousClock) then cause = "client_clock_backwards";
+        elseif (diagnostic.previousClock and clock == diagnostic.previousClock) then cause = "client_clock_repeated"; end
+        if (cause ~= diagnostic.clockCause) then
+            if (cause) then diagnosticEvent(cause, now, clock); end
+            diagnostic.clockCause = cause;
+        end
+        if (finiteNumber(clock) and clock > 0) then diagnostic.previousClock = clock;
+        else diagnostic.previousClock = nil; end
+        local backwards = now and diagnostic.previousWall and now < diagnostic.previousWall or false;
+        if (backwards and not diagnostic.wallBackwards) then diagnosticEvent("wall_clock_backwards", now, clock); end
+        diagnostic.wallBackwards = backwards;
+        diagnostic.previousWall = now;
+    end
+
+    local function diagnosticTransitions(now, clock, runBoundary, beforeTarget, beforeRequest)
+        if (not diagnostic.enabled) then return; end
+        if (runBoundary) then diagnosticEvent("run_reset", now, clock, beforeTarget, beforeRequest); end
+        local gate = diagnosticGate(now);
+        if (not diagnostic.gateObserved) then
+            if (gate) then diagnosticEvent(gate, now, clock, beforeTarget, beforeRequest); end
+        elseif (gate ~= diagnostic.gate or (gate == "phase_suspend" and self.phase ~= diagnostic.phase)) then
+            local reason = gate;
+            if (not reason) then
+                reason = diagnostic.gate == "phase_suspend" and "phase_resume" or "activity_resume";
+            end
+            diagnosticEvent(reason, now, clock, beforeTarget, beforeRequest);
+        end
+        diagnostic.gate = gate; diagnostic.phase = self.phase; diagnostic.gateObserved = true;
+    end
+
+    function self:DiagnosticsEnabled() return diagnostic.enabled; end
+
+    function self:SetDiagnosticsEnabled(value)
+        if (value ~= true and value ~= false) then return false; end
+        if (not diagnostic.recorder) then
+            if (not value or type(AZSSpeedGearDiagnostics) ~= "table"
+                or type(AZSSpeedGearDiagnostics.NewRecorder) ~= "function") then return false; end
+            local ok, recorder = pcall(AZSSpeedGearDiagnostics.NewRecorder);
+            if (not ok or type(recorder) ~= "table" or type(recorder.SetEnabled) ~= "function"
+                or type(recorder.Frame) ~= "function" or type(recorder.Event) ~= "function"
+                or type(recorder.Export) ~= "function" or type(recorder.GetCounts) ~= "function") then return false; end
+            diagnostic.recorder = recorder;
+            diagnostic.context = { wallSecond = false, clientClock = false, rawRunTime = false,
+                rawUpdated = false, phase = false, target100 = false, requested100 = false,
+                active = false, guard = false, observedRunEstimate = false, guardSlowFrames = false,
+                beforeTarget100 = false, beforeRequested100 = false };
+        end
+        local context = diagnosticContext(diagnostic.wallSecond, diagnostic.clientClock);
+        local ok, changed = pcall(diagnostic.recorder.SetEnabled, diagnostic.recorder, value, context);
+        if (not ok) then disableBrokenDiagnostic(); return false; end
+        if (changed) then
+            diagnostic.enabled = value;
+            if (value) then
+                diagnostic.gate = diagnosticGate(diagnostic.wallSecond); diagnostic.phase = self.phase;
+                diagnostic.gateObserved = diagnostic.hasObservation and true or false;
+                diagnostic.previousClock = finiteNumber(diagnostic.clientClock) and diagnostic.clientClock > 0 and diagnostic.clientClock or nil;
+                diagnostic.previousWall = diagnostic.wallSecond;
+                diagnostic.clockCause = nil; diagnostic.wallBackwards = false;
+                if (diagnostic.gateObserved and diagnostic.gate) then
+                    diagnosticEvent(diagnostic.gate, diagnostic.wallSecond, diagnostic.clientClock);
+                end
+            end
+        end
+        return changed and true or false;
+    end
+
+    function self:DiagnosticCounts()
+        if (not diagnostic.recorder) then return 0, 0, false, 0; end
+        local ok, frames, events, frozen, post = pcall(diagnostic.recorder.GetCounts, diagnostic.recorder);
+        if (ok) then return frames, events, frozen, post; end
+        return 0, 0, false, 0;
+    end
+
+    function self:ExportDiagnostics()
+        if (not diagnostic.recorder) then return nil; end
+        local ok, report = pcall(diagnostic.recorder.Export, diagnostic.recorder);
+        if (ok and type(report) == "table") then return report; end
+        return nil;
     end
 
     function self:RealTime()
@@ -136,15 +264,17 @@ function Gear.NewController(api)
             self.frameGuardSlowFrames = self.frameGuardSlowFrames + 1;
         else self.frameGuardSlowFrames = 0; end
         if (self.frameGuardSlowFrames < FRAME_GUARD_COUNT) then return false; end
+        local beforeTarget, beforeRequest = self.desiredSpeed100, self.speed100;
         self.speed100 = 100;
         self.desiredSpeed100 = 100;
         self.frameGuardTripped = true;
+        diagnosticEvent("frame_guard", diagnostic.wallSecond, clock, beforeTarget, beforeRequest);
         self:ResetFrameGuardObservation(clock);
         self:ResetMeasurement();
         return true;
     end
 
-    function self:Emit(now)
+    function self:Emit(now, clock)
         if (not self.bridgeReady or not now) then return false; end
         self.sequence = self.sequence + 1;
         local command = "SG1|" .. integerText(self.session) .. "|" .. integerText(self.sequence)
@@ -152,11 +282,13 @@ function Gear.NewController(api)
             .. "|" .. (self.active and "1" or "0");
         local ok, result = pcall(self.api.send, command);
         if (not ok or result == false) then
+            local beforeTarget, beforeRequest = self.desiredSpeed100, self.speed100;
             self.bridgeReady = false;
             self.sendStatus = "unavailable";
             self.writeFailed = true;
             self.active = false;
             self.speed100 = 100;
+            diagnosticEvent("send_failed", now, clock or diagnostic.clientClock, beforeTarget, beforeRequest);
             self:ResetMeasurement();
             return false;
         end
@@ -353,16 +485,20 @@ function Gear.NewController(api)
     end
 
     function self:Update()
+        local previousPhase, wasInitialized = self.phase, self.initialized;
+        local beforeTarget, beforeRequest = self.desiredSpeed100, self.speed100;
         local now = self:RealTime();
         self.phase = safeCall(self.api.phase);
         self.solo = safeCall(self.api.isSolo);
         local newRun = self.phase == "ready" or self.phase == "dead" or self.phase == "victory";
         local run = safeCall(self.api.runTime);
         local clock = safeCall(self.api.clientClock);
+        diagnostic.wallSecond = now; diagnostic.clientClock = clock; diagnostic.hasObservation = true;
+        local runRegressed = false;
         if (newRun) then
             self.lastObservedRun = nil;
         elseif (finiteNumber(run) and run >= 0 and (self.phase == "playing" or self.phase == "paused" or self.phase == "choosing")) then
-            if (self.lastObservedRun and run + 1 < self.lastObservedRun) then newRun = true; end
+            if (self.lastObservedRun and run + 1 < self.lastObservedRun) then newRun = true; runRegressed = true; end
             self.lastObservedRun = run;
         end
         if (newRun) then
@@ -378,16 +514,23 @@ function Gear.NewController(api)
             -- Choices and pause suspend the request while retaining this run's setting.
             -- A new run, explicit stop or world exit resets that setting to one.
             self.speed100 = allowed and self.desiredSpeed100 or 100;
+        end
+        local runBoundary = newRun and (runRegressed or previousPhase ~= self.phase or not wasInitialized);
+        diagnosticTransitions(now, clock, runBoundary, beforeTarget, beforeRequest);
+        if (changed) then
             self:ResetMeasurement();
             self:ResetFrameGuardObservation(clock);
         end
         -- GetTime already includes the applied client-clock scale. Never divide
         -- by the selected rate to invent FPS; movement consumes this frame step.
+        -- Update is also called by manual controls. These are controller
+        -- observations, not a guarantee of one sample per physical frame.
+        diagnosticFrame(now, clock);
         local frameRestored = self:ObserveFrameGuard(clock);
         if (changed or frameRestored) then
-            self:Emit(now);
+            self:Emit(now, clock);
         elseif (self.bridgeReady and now and (not self.lastSent or now < self.lastSent or now - self.lastSent >= 5)) then
-            self:Emit(now);
+            self:Emit(now, clock);
         elseif (self.bridgeReady and now and (not self.lastPulse or now < self.lastPulse or now - self.lastPulse >= 1)) then
             self:Pulse(now);
         end
@@ -399,7 +542,11 @@ function Gear.NewController(api)
 
     function self:RequestSpeed(value)
         self:Update();
-        if (not finiteNumber(value) or value < MIN_SPEED or value > MAX_SPEED or not self.active) then return false; end
+        if (not finiteNumber(value) or value < MIN_SPEED or value > MAX_SPEED or not self.active) then
+            diagnosticEvent("request_rejected", diagnostic.wallSecond, diagnostic.clientClock);
+            return false;
+        end
+        local beforeTarget, beforeRequest = self.desiredSpeed100, self.speed100;
         self.speed100 = math.floor(value + 0.5);
         self.desiredSpeed100 = self.speed100;
         self.frameGuardTripped = false;
@@ -407,13 +554,16 @@ function Gear.NewController(api)
         self:ResetFrameGuardObservation(clock);
         self:ResetMeasurement();
         local now = self:RealTime();
-        local emitted = self:Emit(now);
+        diagnostic.wallSecond = now; diagnostic.clientClock = clock;
+        diagnosticEvent("manual_speed", now, clock, beforeTarget, beforeRequest);
+        local emitted = self:Emit(now, clock);
         if (self.active) then self:Measure(now, clock, true); end
         return emitted;
     end
 
     function self:EmergencyStop()
         self:Update();
+        local beforeTarget, beforeRequest = self.desiredSpeed100, self.speed100;
         self.speed100 = 100;
         self.desiredSpeed100 = 100;
         self.frameGuardTripped = false;
@@ -421,20 +571,28 @@ function Gear.NewController(api)
         self:ResetFrameGuardObservation(clock);
         self:ResetMeasurement();
         local now = self:RealTime();
-        local emitted = self:Emit(now);
+        diagnostic.wallSecond = now; diagnostic.clientClock = clock;
+        diagnosticEvent("manual_stop", now, clock, beforeTarget, beforeRequest);
+        local emitted = self:Emit(now, clock);
         if (self.active) then self:Measure(now, clock, true); end
         return emitted;
     end
 
     function self:Shutdown()
+        local beforeTarget, beforeRequest = self.desiredSpeed100, self.speed100;
         self.active = false;
         self.speed100 = 100;
         self.desiredSpeed100 = 100;
         self.lastObservedRun = nil;
         self.frameGuardTripped = false;
         self:ResetFrameGuardObservation();
+        local now = self:RealTime();
+        diagnostic.wallSecond = now; diagnostic.clientClock = nil;
+        diagnosticEvent("world_exit", now, nil, beforeTarget, beforeRequest);
         self:ResetMeasurement();
-        return self:Emit(self:RealTime());
+        local emitted = self:Emit(now);
+        self:SetDiagnosticsEnabled(false);
+        return emitted;
     end
 
     return self;
@@ -511,10 +669,12 @@ local lastHotkeyText = nil;
 local customTyping = false;
 local saveBindingsWrapped = false;
 local layoutPanel = nil;
+local render = nil;
 local panelWidgets = nil;
 -- Lua 5.0 limits each closure to 32 upvalues. Keep layout bookkeeping in one
 -- owner rather than making buildPanel capture every individual state field.
-local layoutState = { dirty = true, detailsOpen = false, widthCache = {}, widthCacheCount = 0 };
+local layoutState = { dirty = true, detailsOpen = false, widthCache = {}, widthCacheCount = 0,
+    refresh = { frames = 0, since = 0, stride = 8, used = 0 } };
 
 local function bindText(widget, key)
     table.insert(captions, { widget = widget, key = key });
@@ -571,24 +731,34 @@ local function updateLauncherTooltip()
     end
 end
 
-local function updateLauncher()
+local function updateLauncher(refreshTooltip)
     if (not launcher) then return; end
-    local text = tr("launcher");
-    if (worldActive and controller.active) then
-        if (measurementMatchesTarget()) then text = text .. " ×" .. speedText(controller.speed100);
-        else
-            -- Keep the requested number visible without calling it measured.
-            text = string.format(tr("launcher_target"), speedText(controller.speed100))
-                .. (controller.measurementMismatch and " !" or " …");
+    local state = layoutState.refresh;
+    local matches = measurementMatchesTarget();
+    local changed = state.launcherWorld ~= worldActive or state.launcherActive ~= controller.active
+        or state.launcherSpeed ~= controller.speed100 or state.launcherMatches ~= matches
+        or state.launcherMismatch ~= controller.measurementMismatch or state.launcherLocale ~= I18n.code;
+    if (changed or not lastLauncherText) then
+        state.launcherWorld, state.launcherActive = worldActive, controller.active;
+        state.launcherSpeed, state.launcherMatches = controller.speed100, matches;
+        state.launcherMismatch, state.launcherLocale = controller.measurementMismatch, I18n.code;
+        local text = tr("launcher");
+        if (worldActive and controller.active) then
+            if (matches) then text = text .. " ×" .. speedText(controller.speed100);
+            else
+                -- Keep the requested number visible without calling it measured.
+                text = string.format(tr("launcher_target"), speedText(controller.speed100))
+                    .. (controller.measurementMismatch and " !" or " …");
+            end
+        end
+        if (text ~= lastLauncherText) then
+            launcher:SetText(text);
+            lastLauncherText = text;
+            -- Resizing during native dragging would move the pointer's grab point.
+            if (not launcher.speedGearDragging) then sizeLauncher(text); end
         end
     end
-    updateLauncherTooltip();
-    if (text ~= lastLauncherText) then
-        launcher:SetText(text);
-        lastLauncherText = text;
-        -- Resizing during native dragging would move the pointer's grab point.
-        if (not launcher.speedGearDragging) then sizeLauncher(text); end
-    end
+    if (changed or refreshTooltip) then updateLauncherTooltip(); end
 end
 
 local function chat(message)
@@ -603,15 +773,75 @@ local function savedDatabase()
     return AZSSpeedGearDB;
 end
 
+-- Optional display/recording controls share an owner to keep Lua 5.0 closure
+-- upvalue counts bounded. None of these operations send a speed request.
+layoutState.features = {};
+function layoutState.features.refresh()
+    local w = panelWidgets;
+    if (not w or not layoutState.detailsOpen) then return; end
+    local feature = layoutState.features;
+    local compatible = type(KeijinUI) == "table" and type(KeijinUI.damageText) == "table"
+        and KeijinUI.damageText.azsgPerformanceRevision == 1;
+    local liteKey = compatible and Gear.lightweightCombatText == true and "perf_lite_on" or "perf_lite_off";
+    local _, _, frozen = controller:DiagnosticCounts();
+    local traceKey = controller:DiagnosticsEnabled() and (frozen and "diagnostics_captured" or "diagnostics_on") or "diagnostics_off";
+    if (feature.liteKey ~= liteKey or feature.locale ~= I18n.code) then
+        w.lite:SetText(tr(liteKey)); feature.liteKey = liteKey; layoutState.dirty = true;
+    end
+    if (feature.traceKey ~= traceKey or feature.locale ~= I18n.code) then
+        w.trace:SetText(tr(traceKey)); feature.traceKey = traceKey; layoutState.dirty = true;
+    end
+    feature.locale = I18n.code;
+end
+
+function layoutState.features.save(announce)
+    local report = controller:ExportDiagnostics();
+    if (not report or (report.frameCount == 0 and report.eventCount == 0)) then
+        if (announce) then chat(tr("diagnostics_unavailable")); end
+        return false;
+    end
+    savedDatabase().diagnosticTrace = report;
+    if (announce) then chat(tr("diagnostics_saved")); end
+    return true;
+end
+
+function layoutState.features.toggleTrace()
+    if (controller:DiagnosticsEnabled()) then
+        controller:SetDiagnosticsEnabled(false);
+        layoutState.features.save(true);
+    elseif (controller:SetDiagnosticsEnabled(true)) then
+        layoutState.features.savedFreeze = false;
+    else chat(tr("diagnostics_unavailable")); end
+    layoutState.features.refresh(); render(true);
+end
+
+function layoutState.features.toggleLite()
+    if (type(KeijinUI) ~= "table" or type(KeijinUI.damageText) ~= "table"
+        or KeijinUI.damageText.azsgPerformanceRevision ~= 1) then
+        chat(tr("perf_lite_unavailable")); return;
+    end
+    Gear.lightweightCombatText = Gear.lightweightCombatText ~= true;
+    savedDatabase().lightweightCombatText = Gear.lightweightCombatText;
+    layoutState.features.refresh(); render(true);
+end
+
 local function refreshHotkeys()
     if (not keyManager or not hotkeyDownButton) then return; end
     local down, up = keyManager:GetKey("down"), keyManager:GetKey("up");
+    local state = layoutState.refresh;
+    local available = keyManager:Available();
+    if (lastHotkeyText and state.hotkeyDown == down and state.hotkeyUp == up
+        and state.hotkeyCapture == captureAction and state.hotkeyError == hotkeyError
+        and state.hotkeyAvailable == available and state.hotkeyLocale == I18n.code) then return; end
+    state.hotkeyDown, state.hotkeyUp = down, up;
+    state.hotkeyCapture, state.hotkeyError = captureAction, hotkeyError;
+    state.hotkeyAvailable, state.hotkeyLocale = available, I18n.code;
     local downText = string.format(tr("hotkey_down"), down == "" and tr("hotkey_unbound") or down);
     local upText = string.format(tr("hotkey_up"), up == "" and tr("hotkey_unbound") or up);
     if (captureAction == "down") then downText = "…"; end
     if (captureAction == "up") then upText = "…"; end
     local hint = tr(hotkeyError or (captureAction and "hotkey_listening") or
-        (not keyManager:Available() and "hotkey_unsupported") or "hotkey_hint");
+        (not available and "hotkey_unsupported") or "hotkey_hint");
     local signature = downText .. upText .. hint;
     if (signature ~= lastHotkeyText) then
         hotkeyDownButton:SetText(downText); hotkeyUpButton:SetText(upText);
@@ -665,7 +895,7 @@ local function setShown(shown)
         if (db.show) then
             panel:Show();
             layoutState.dirty = true;
-            if (layoutPanel) then layoutPanel(); end
+            if (render) then render(true); elseif (layoutPanel) then layoutPanel(); end
         else
             customTyping = false;
             if (customBox and type(customBox.ClearFocus) == "function") then customBox:ClearFocus(); end
@@ -680,9 +910,70 @@ local function sendingText()
     return tr("send_unavailable");
 end
 
-local function render()
-    updateLauncher();
+-- Only independent integer wall seconds budget presentation work. Callback
+-- counts spread that budget across the observed cadence; this is not a derived
+-- subsecond clock and never divides a client clock by a requested multiplier.
+local function observeRefreshFrame(now)
+    local state = layoutState.refresh;
+    local clock = now or false;
+    if (state.wall ~= clock) then
+        local ordinary = type(state.wall) == "number" and type(clock) == "number" and clock == state.wall + 1;
+        if (ordinary and state.frames > 0) then state.stride = math.max(1, math.ceil(state.frames / 8));
+        else state.stride = 8; end
+        state.clockReset = not ordinary;
+        state.wall, state.frames, state.used, state.since = clock, 1, 0, state.stride;
+    else state.frames = state.frames + 1; state.since = state.since + 1; end
+end
+
+local function numericRefreshDue(force)
+    local state = layoutState.refresh;
+    if (force or state.clockReset) then
+        state.clockReset = false; state.since = 0; return true;
+    end
+    if ((state.wall == false or state.used < 8) and state.since >= state.stride) then
+        state.used = state.used + 1; state.since = 0; return true;
+    end
+    return false;
+end
+
+local function criticalDisplayChanged(visible)
+    local state = layoutState.refresh;
+    local clockAvailable = controller:RealTime() ~= nil;
+    local hasMeasurement = controller.measured ~= nil;
+    local changed = state.visible ~= visible or state.active ~= controller.active
+        or state.speed ~= controller.speed100 or state.desired ~= controller.desiredSpeed100
+        or state.phase ~= controller.phase or state.solo ~= controller.solo
+        or state.bridge ~= controller.bridgeReady or state.sending ~= controller.sendStatus
+        or state.guard ~= controller.frameGuardTripped or state.mismatch ~= controller.measurementMismatch
+        or state.confirmed ~= controller.confirmedSpeed100 or state.notice ~= noticeKey
+        or state.clockAvailable ~= clockAvailable or state.hasMeasurement ~= hasMeasurement
+        or state.locale ~= I18n.code;
+    state.visible, state.active = visible, controller.active;
+    state.speed, state.desired = controller.speed100, controller.desiredSpeed100;
+    state.phase, state.solo = controller.phase, controller.solo;
+    state.bridge, state.sending = controller.bridgeReady, controller.sendStatus;
+    state.guard, state.mismatch = controller.frameGuardTripped, controller.measurementMismatch;
+    state.confirmed, state.notice = controller.confirmedSpeed100, noticeKey;
+    state.clockAvailable, state.hasMeasurement, state.locale = clockAvailable, hasMeasurement, I18n.code;
+    return changed;
+end
+
+render = function(force)
+    local visibility = panel and panel:IsShown();
+    local visible = visibility == true or visibility == 1;
+    local guardNotice = controller.frameGuardTripped and controller.bridgeReady;
+    if (guardNotice and controller.active and not lastFrameGuardNotice) then chat(tr("frame_guard")); end
+    lastFrameGuardNotice = controller.frameGuardTripped and true or false;
+    if (measurementMatchesTarget() and (noticeKey == "switching" or noticeKey == "stop_sent")) then
+        noticeKey = "hint";
+    end
+    local important = criticalDisplayChanged(visible);
+    local numeric = false;
+    if (visible or (launcher and launcher.speedGearHovered)) then numeric = numericRefreshDue(force or important); end
+    updateLauncher(numeric or important or force);
     refreshHotkeys();
+    if (not visible or not numeric) then return; end
+    layoutState.features.refresh();
     if (panelWidgets and controller.desiredSpeed100 ~= layoutState.lastPresetSelection) then
         local _, button;
         for _, button in ipairs(panelWidgets.presets) do
@@ -690,12 +981,6 @@ local function render()
             if (type(button[method]) == "function") then button[method](button); end
         end
         layoutState.lastPresetSelection = controller.desiredSpeed100;
-    end
-    local guardNotice = controller.frameGuardTripped and controller.bridgeReady;
-    if (guardNotice and controller.active and not lastFrameGuardNotice) then chat(tr("frame_guard")); end
-    lastFrameGuardNotice = controller.frameGuardTripped and true or false;
-    if (measurementMatchesTarget() and (noticeKey == "switching" or noticeKey == "stop_sent")) then
-        noticeKey = "hint";
     end
     local notice = tr(guardNotice and "frame_guard" or noticeKey);
     if (noticeLabel and notice ~= lastNoticeText) then
@@ -744,6 +1029,9 @@ local function render()
     end
     if (layoutState.dirty and layoutPanel) then layoutPanel(); end
 end
+-- Keep presentation callbacks on the existing owner: buildPanel is already
+-- close to Lua 5.0's per-closure upvalue limit.
+layoutState.render = render;
 
 local function requestSpeed(value)
     local sent = controller:RequestSpeed(value);
@@ -752,7 +1040,7 @@ local function requestSpeed(value)
     else
         noticeKey = "invalid_speed";
     end
-    render();
+    render(true);
     return sent;
 end
 
@@ -838,7 +1126,7 @@ local function emergencyStop()
     local sent = controller:EmergencyStop();
     if (sent) then noticeKey = "stop_sent";
     else noticeKey = "stop_failed"; end
-    render();
+    render(true);
 end
 
 local function textColor(widget, red, green, blue)
@@ -996,6 +1284,7 @@ layoutPanel = function()
                 y = y + rowHeight + gap; x = padding; rowHeight = 0;
             end
             placeWidget(button, x, y, bw, bh);
+            button:Show();
             x = x + bw + gap; rowHeight = math.max(rowHeight, bh);
         end
         return y + rowHeight;
@@ -1043,10 +1332,14 @@ layoutPanel = function()
     y = y + math.max(stopHeight, detailHeight);
     if (layoutState.detailsOpen) then
         y = y + 12;
+        y = buttonRow({ w.lite, w.trace, w.traceSave }, y) + 6;
         y = y + label(sendStatusLabel, y) + 6;
         y = y + label(w.commands, y) + 6;
         y = y + label(w.hint, y);
-    else sendStatusLabel:Hide(); w.commands:Hide(); w.hint:Hide(); end
+    else
+        w.lite:Hide(); w.trace:Hide(); w.traceSave:Hide();
+        sendStatusLabel:Hide(); w.commands:Hide(); w.hint:Hide();
+    end
     panel:SetHeight(y + 16);
 end
 
@@ -1127,7 +1420,7 @@ local function buildPanel()
     panel:EnableMouse(true);
     panel:RegisterForDrag("LeftButton");
     panel:SetScript("OnHide", function() customTyping = false; stopHotkeyCapture(); end);
-    panel:SetScript("OnShow", function() layoutState.dirty = true; if (layoutPanel) then layoutPanel(); end end);
+    panel:SetScript("OnShow", function() layoutState.dirty = true; layoutState.render(true); end);
     if (type(panel.SetClampedToScreen) == "function") then pcall(panel.SetClampedToScreen, panel, true); end
     panel:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", tile = false, edgeSize = 12, insets = { left = 4, right = 4, top = 4, bottom = 4 } });
     panel:SetBackdropColor(0.055, 0.05, 0.045, 0.97);
@@ -1148,7 +1441,7 @@ local function buildPanel()
         db.relativePoint = relativePoint;
         db.x = x;
         db.y = y;
-        layoutState.dirty = true; if (layoutPanel) then layoutPanel(); end
+        layoutState.dirty = true; layoutState.render(true);
     end);
     local w = {};
     w.title = addText(panel, 13, 16, -16, "title");
@@ -1181,7 +1474,7 @@ local function buildPanel()
     local function submitCustom()
         local number = tonumber(customBox:GetText());
         if (finiteNumber(number)) then requestSpeed(number * 100);
-        else noticeKey = "invalid_speed"; render(); end
+        else noticeKey = "invalid_speed"; layoutState.render(true); end
         customTyping = false; customBox:ClearFocus();
     end
     customBox:SetScript("OnEnterPressed", submitCustom);
@@ -1219,8 +1512,19 @@ local function buildPanel()
     textColor(noticeLabel, 1, 0.82, 0.38);
     w.hotkeyHint, w.notice = hotkeyHint, noticeLabel;
     w.details = addButton(panel, "AZSSpeedGearDetails", "details", 0, 0, 44, function()
-        layoutState.detailsOpen = not layoutState.detailsOpen; layoutState.dirty = true; layoutPanel();
+        layoutState.detailsOpen = not layoutState.detailsOpen; layoutState.dirty = true;
+        layoutState.features.refresh(); layoutPanel();
     end);
+    w.lite = addButton(panel, "AZSSpeedGearLightText", "perf_lite_off", 0, 0, 44, layoutState.features.toggleLite);
+    w.trace = addButton(panel, "AZSSpeedGearDiagnosticToggle", "diagnostics_off", 0, 0, 44, layoutState.features.toggleTrace);
+    w.traceSave = addButton(panel, "AZSSpeedGearKeepTrace", "diagnostics_save", 0, 0, 44,
+        function() layoutState.features.save(true); end);
+    w.trace:SetScript("OnEnter", function()
+        if (GameTooltip and type(GameTooltip.SetOwner) == "function" and type(GameTooltip.SetText) == "function") then
+            GameTooltip:SetOwner(this, "ANCHOR_LEFT"); GameTooltip:SetText(tr("diagnostics_hint")); GameTooltip:Show();
+        end
+    end);
+    w.trace:SetScript("OnLeave", function() if (GameTooltip and type(GameTooltip.Hide) == "function") then GameTooltip:Hide(); end end);
     w.commands = addText(panel, 10, 0, 0, "commands");
     w.hint = addText(panel, 10, 0, 0, "hint");
     textColor(w.commands, 0.72, 0.70, 0.65); textColor(w.hint, 0.72, 0.70, 0.65);
@@ -1234,6 +1538,11 @@ local function loadSettings()
     I18n.Refresh();
     local db = savedDatabase();
     dbReady = true;
+    Gear.lightweightCombatText = db.lightweightCombatText == true;
+    db.lightweightCombatText = Gear.lightweightCombatText;
+    if (type(AZSSpeedGearDiagnostics) == "table") then
+        db.diagnosticTrace = AZSSpeedGearDiagnostics.SanitizeExport(db.diagnosticTrace);
+    else db.diagnosticTrace = nil; end
     prepareHotkeys(db);
     buildPanel();
     buildLauncher();
@@ -1249,7 +1558,7 @@ local function loadSettings()
     showLauncher();
     if (worldActive and keyManager) then keyManager:Apply(); end
     controller:Update();
-    render();
+    render(true);
 end
 
 local function slash(message)
@@ -1279,7 +1588,7 @@ I18n.Listen(function()
     lastHotkeyText = nil;
     lastNoticeText = nil;
     lastRendered = nil;
-    render();
+    render(true);
 end);
 
 SLASH_AZSSPEEDGEAR1 = "/azsg";
@@ -1300,6 +1609,7 @@ if (type(CreateFrame) == "function") then
             if (keyManager) then keyManager:Release(); end
             showLauncher();
             controller:Shutdown();
+            layoutState.features.save(false);
             updateLauncher();
         elseif (event == "ADDON_LOADED") then
             if (arg1 == "AZSSpeedGear") then loadSettings(); end
@@ -1310,14 +1620,21 @@ if (type(CreateFrame) == "function") then
             showLauncher();
             controller:Update();
             if (keyManager) then keyManager:Apply(); end
-            render();
+            render(true);
         end
     end);
     driver:SetScript("OnUpdate", function()
         if (dbReady) then
             local now = controller:RealTime();
             if (now ~= lastLocaleSecond) then I18n.Refresh(); lastLocaleSecond = now; end
+            observeRefreshFrame(now);
             controller:Update(); render();
+            if (controller:DiagnosticsEnabled() and not layoutState.features.savedFreeze) then
+                local _, _, frozen = controller:DiagnosticCounts();
+                if (frozen) then
+                    layoutState.features.save(false); layoutState.features.savedFreeze = true;
+                end
+            end
         end
     end);
     Gear.driver = driver;

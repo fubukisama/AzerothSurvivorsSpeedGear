@@ -43,6 +43,12 @@ jobs:
           if ((Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne '2265a223d9e2f01f82f45290d885b884e4dbe8026352f2815956608f837f0cb3') { throw 'Meter source identity mismatch' }
           Add-Content $env:GITHUB_ENV "AZSG_METER_ORIGINAL=$path"
           Add-Content $env:GITHUB_ENV "AZSG_METER_SOURCE=$($path.Replace('.lua','-repaired.lua'))"
+      - name: Stage pinned Keijin damage-only fixture
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP 'Keijin-DamageText.lua'
+          ./tools/StageKeijinFixture.ps1 -OutputPath $path | Out-Null
+          Add-Content $env:GITHUB_ENV "AZSG_KEIJIN_ORIGINAL=$path"
+          Add-Content $env:GITHUB_ENV "AZSG_KEIJIN_SOURCE=$($path.Replace('.lua','-repaired.lua'))"
       - name: Configure
         run: cmake -S . -B build -A x64 "-DLUA50_ROOT=$env:LUA50_ROOT"
       - name: Build
@@ -73,6 +79,23 @@ jobs:
           $rejected = $false
           try { ./scripts/RepairSpellMeter.ps1 -SourcePath $unknown | Out-Null } catch { $rejected = $true }
           if (-not $rejected -or (Get-FileHash $unknown).Hash -cne $before) { throw 'Unknown source protection failed' }
+          $global:LASTEXITCODE = 0
+      - name: Verify original Keijin failure and repair the disposable source
+        run: |
+          & ./build/Release/lua50.exe tests/keijin_width_cache.lua $env:AZSG_KEIJIN_ORIGINAL 2>&1 | Tee-Object -FilePath keijin-original.txt
+          if ($LASTEXITCODE -eq 0) { throw 'Unoptimized Keijin unexpectedly passed the cache regression' }
+          Copy-Item -LiteralPath $env:AZSG_KEIJIN_ORIGINAL -Destination $env:AZSG_KEIJIN_SOURCE
+          $repair = ./scripts/RepairKeijin.ps1 -SourcePath $env:AZSG_KEIJIN_SOURCE
+          if (-not $repair.Changed -or $repair.OriginalSHA256 -cne '16d058315a36f1dd48be8240c5b776924a3901b0ab80ae62b39f697bedd3f141') { throw 'Keijin repair did not match the installed source' }
+          if ((Get-FileHash (Join-Path $repair.BackupDirectory 'DamageText.lua')).Hash.ToLowerInvariant() -cne $repair.OriginalSHA256) { throw 'Keijin backup differs from input' }
+          $again = ./scripts/RepairKeijin.ps1 -SourcePath $env:AZSG_KEIJIN_SOURCE
+          if ($again.Changed -or $again.SHA256 -cne $repair.SHA256) { throw 'Keijin repair is not idempotent' }
+          $unknown = Join-Path $env:RUNNER_TEMP 'unknown-keijin.lua'
+          [IO.File]::WriteAllText($unknown, '-- unsupported source')
+          $before = (Get-FileHash $unknown).Hash
+          $rejected = $false
+          try { ./scripts/RepairKeijin.ps1 -SourcePath $unknown | Out-Null } catch { $rejected = $true }
+          if (-not $rejected -or (Get-FileHash $unknown).Hash -cne $before) { throw 'Unknown Keijin source was changed' }
           $global:LASTEXITCODE = 0
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
@@ -122,6 +145,10 @@ jobs:
           Copy-Item -LiteralPath $env:AZSG_METER_ORIGINAL -Destination $legacy
           $repair = ./scripts/RepairSpellMeter.ps1 -SourcePath $legacy
           if (-not $repair.Changed -or $repair.SHA256 -cne '9a2273e6d75998ae2a3fa75904212667d40952cf920728a56fd49b0483793aa6') { throw 'Windows PowerShell repair failed' }
+          $legacyKeijin = Join-Path $env:RUNNER_TEMP 'PS51Keijin.lua'
+          Copy-Item -LiteralPath $env:AZSG_KEIJIN_ORIGINAL -Destination $legacyKeijin
+          $keijin = ./scripts/RepairKeijin.ps1 -SourcePath $legacyKeijin
+          if (-not $keijin.Changed -or (Get-FileHash $legacyKeijin).Hash -cne (Get-FileHash $env:AZSG_KEIJIN_SOURCE).Hash) { throw 'Windows PowerShell Keijin repair differs' }
       - name: Package
         run: ./scripts/Package.ps1
       - uses: actions/upload-artifact@v4

@@ -174,7 +174,10 @@ function Invoke-LauncherAcceptance([string]$GameRoot, [string]$Assets, [string]$
         Write-Text (Join-Path $observer 'AZSGLauncherTest.toc') "## Interface: 11200`n## Title: AZSG launcher observation`n## Dependencies: AZSSpeedGear`nTelemetry.lua`n"
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'remote_launcher_telemetry.lua') -Destination (Join-Path $observer 'Telemetry.lua')
         if($script:la.lagMode){
-            $probe="AZSG_LAG_PROBE_REMOTE = true`n"+[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'remote_lag_telemetry.lua'))
+            $lagVariant=[string]$env:AZSG_LAG_VARIANT
+            if($lagVariant -cnotin @('all_current','all_repaired','speedgear_only')){throw 'blocked_lag_variant'}
+            $optimizedLiteral=if($lagVariant -ceq 'all_repaired'){'true'}else{'false'}
+            $probe="AZSG_LAG_PROBE_REMOTE = true`nAZSG_LAG_OPTIMIZED_REMOTE = $optimizedLiteral`n"+[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'remote_lag_telemetry.lua'))
             Write-Text (Join-Path $observer 'Lag.lua') $probe
             Add-Content -LiteralPath (Join-Path $observer 'AZSGLauncherTest.toc') -Value 'Lag.lua' -Encoding utf8
         }
@@ -187,9 +190,17 @@ function Invoke-LauncherAcceptance([string]$GameRoot, [string]$Assets, [string]$
         $info.Environment['RUST_LOG']='info,wgpu_core=warn,wgpu_hal=warn,naga=warn';$info.Environment['WOW_WIN']=$script:viewport;$info.Environment['BENILLA_HOME']=$state
         $appData=Join-Path $destination 'AppData';New-Item -ItemType Directory -Path $appData | Out-Null
         if($script:la.lagMode){
-            $variant=if($env:AZSG_LAG_VARIANT -ceq 'speedgear_only'){'speedgear_only'}else{'all'}
+            $variant=if($lagVariant -ceq 'speedgear_only'){'speedgear_only'}else{'all'}
             $script:la.lagProfile=Copy-LagAddons -GameRoot $destination -Variant $variant
-            if($env:AZSG_LAG_VARIANT -ceq 'all_repaired'){& (Join-Path $script:package 'scripts\RepairSpellMeter.ps1') -SourcePath (Join-Path $state 'AddOns\AZSSpellMeter\AZSSpellMeter.lua') | Out-Null}
+            if($lagVariant -cne 'speedgear_only'){
+                $meter=& (Join-Path $script:package 'scripts\RepairSpellMeter.ps1') -SourcePath (Join-Path $state 'AddOns\AZSSpellMeter\AZSSpellMeter.lua')
+                $script:la.lagProfile | Add-Member -NotePropertyName meterRepairSHA256 -NotePropertyValue $meter.SHA256
+            }
+            if($lagVariant -ceq 'all_repaired'){
+                $keijin=& (Join-Path $script:package 'scripts\RepairKeijin.ps1') -SourcePath (Join-Path $state 'AddOns\KeijinUI\DamageText.lua')
+                $script:la.lagProfile | Add-Member -NotePropertyName keijinRepairSHA256 -NotePropertyValue $keijin.SHA256
+            }
+            $script:la.lagProfile | Add-Member -NotePropertyName optimizedFeaturesOptIn -NotePropertyValue ($lagVariant -ceq 'all_repaired')
             $info.Environment['WOW_GLYPH_CACHE']='1';$info.Environment['WOW_UI_COST']='1';$info.Environment['WOW_UI_HANDLERS']='5'
         }
         $info.Environment['APPDATA']=$appData;$info.Environment['LOCALAPPDATA']=$appData
